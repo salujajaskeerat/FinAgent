@@ -45,15 +45,20 @@ The workflow has explicit states, no model-generated SQL, no autonomous web
 search, and at most one constrained output repair. Derived financial ratios are
 calculated by deterministic code before LLM synthesis.
 
-### Gemini is a constrained reasoning adapter
+### The LLM is a constrained, provider-neutral reasoning adapter
 
-The production adapter uses Gemini for two typed operations: proposing a small
-retrieval plan and synthesizing a source-linked draft. Gemini receives no MCP,
-Google Search, URL, SQL, or function tools. `AnalysisService` intersects every
-proposed entity, metric, and event with the MCP catalog before performing the
+The gateway uses the model for three typed operations: proposing a small
+retrieval plan, synthesizing a source-linked draft, and repairing one invalid
+draft. The model receives no MCP, search, URL, SQL, or function tools.
+`AnalysisService` intersects every proposed entity, metric, and event with the
+MCP catalog and unions in the persona's required inputs before performing the
 queries itself. After synthesis, deterministic validation rejects company or
-source identifiers that were not present in retrieved evidence. The fake
-adapter remains available only as an explicit offline/test mode.
+source identifiers that were not present in retrieved evidence.
+
+Prompt composition and validation live in one gateway that imports no vendor
+SDK; vendors are one-file adapters behind a single structured-completion seam
+(Gemini, any OpenAI-compatible endpoint, Anthropic, and an offline fake).
+Switching providers is a `.env` change.
 
 ### Entity resolution is deterministic first
 
@@ -109,7 +114,7 @@ flowchart TB
         API --> Agent["AnalysisService<br/>single bounded workflow"]
         Agent --> Policy["Persona policy registry"]
         Agent --> Calculator["Deterministic calculations"]
-        Agent --> LLM["Gemini structured-output adapter<br/>or explicit offline fake"]
+        Agent --> LLM["Provider-neutral LLM gateway<br/>gemini / openai_compatible / anthropic / fake"]
         Agent --> MCPClient["MCP client"]
         MCPClient -->|"MCP Streamable HTTP"| MCPServer["MCP data server"]
         MCPServer --> Repository["Read-only repository"]
@@ -124,32 +129,24 @@ The standalone Mermaid source is in
 
 ```mermaid
 stateDiagram-v2
-    [*] --> ValidateRequest
-    ValidateRequest --> InvalidRequest: Invalid persona or sector
-    ValidateRequest --> LoadCatalog: Valid request
-    LoadCatalog --> DependencyFailure: MCP unavailable
-    LoadCatalog --> ParseQuestion: Catalog loaded
-    ParseQuestion --> ResolveEntities
-    ResolveEntities --> OutOfScope: Unsupported company
-    ResolveEntities --> BuildEvidencePlan: Scope supported
-    BuildEvidencePlan --> QueryMCP
-    QueryMCP --> DependencyFailure: Query failed
-    QueryMCP --> EvidenceGate: Evidence returned
-    EvidenceGate --> InsufficientData: Mandatory facts absent
-    EvidenceGate --> CalculateFeatures: Evidence usable
-    CalculateFeatures --> ApplyPersona
-    ApplyPersona --> ValidateOutput
-    ValidateOutput --> Complete: References valid
-    ValidateOutput --> RepairOnce: Invalid evidence reference
-    RepairOnce --> Complete: Repaired
-    RepairOnce --> SafePartial: Still invalid
-    InvalidRequest --> [*]
-    OutOfScope --> [*]
-    InsufficientData --> [*]
-    DependencyFailure --> [*]
-    SafePartial --> [*]
-    Complete --> [*]
+    [*] --> received
+    received --> resolving_scope
+    resolving_scope --> completed: unresolved explicit company (out_of_scope, no LLM call)
+    resolving_scope --> planning
+    planning --> retrieving: plan intersected with catalog + persona inputs
+    retrieving --> completed: no evidence (insufficient_data)
+    retrieving --> calculating
+    calculating --> synthesizing: derived metrics attached
+    synthesizing --> validating
+    validating --> completed: all findings grounded
+    validating --> repairing: unknown source or company ID
+    repairing --> validating: one attempt only
+    completed --> [*]
 ```
+
+State names match `AnalysisState` in `core/state.py`; the sequence visited is
+returned in every response's `trace.states`. A second failed validation ends in
+`insufficient_data`.
 
 The standalone Mermaid source is in
 [`diagrams/agent-state-machine.mmd`](diagrams/agent-state-machine.mmd).

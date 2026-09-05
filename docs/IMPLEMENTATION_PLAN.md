@@ -16,30 +16,21 @@ not broad market coverage. Target roughly 35–50 well-sourced records per secto
 
 ## Current Status
 
-The real runtime boundary is implemented and integration-tested:
+All milestones through M5 are implemented on the real SEC dataset:
 
-```text
-FastAPI -> AnalysisService -> MCP Streamable HTTP -> read-only SQLite
-```
+- M0–M2: typed contracts, reproducible ingestion, and the enforced MCP boundary
+  (typed tool schemas, read-only annotations, schema resource, stdio option).
+- M3: bounded workflow with deterministic derived metrics (`calculating`
+  state), coverage-driven evidence status, persona reasoning frames in YAML, a
+  provider-neutral LLM gateway, and a response `trace`.
+- M4: FastAPI contract (schema 1.1) and a Streamlit UI with side-by-side
+  persona comparison.
+- M5: `scripts/eval_matrix.py` runs the assignment's sample queries and the
+  full persona × sector sweep; README carries the schema, MCP, and
+  what-next write-up.
 
-The tests exercise all four MCP tools through the official client, verify the
-latest dated headcount signal and its source, reject unknown and cross-sector
-IDs, and prove that an out-of-scope company exits before LLM planning or
-synthesis. The fixture's explicit quality caveat is preserved as a `partial`
-evidence status. Run this milestone independently with:
-
-```bash
-uv run pytest -m integration
-```
-
-The M1 SEC-only core is now reproducible: a single explicit refresh command
-caches submissions, Companyfacts, and immutable annual filings; the offline
-builder populates financials, headcount, filing-disclosed prices, and
-source-lineaged peer medians; and a read-only audit verifies coverage and
-provenance. The next data task is an explicitly licensed price/valuation adapter
-for fields that annual filings do not disclose consistently. The Gemini
-structured-output adapter is now implemented behind the existing LLM port;
-richer UI and deployment remain later milestones.
+Remaining ideas are listed under "What I would improve with more time" in the
+README.
 
 ## Delivery Principles
 
