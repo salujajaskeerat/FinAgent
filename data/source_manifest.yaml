@@ -18,15 +18,19 @@ sectors:
       - name: Apple Inc.
         ticker: AAPL
         cik: "0000320193"
+        aliases: [Apple]
       - name: Microsoft Corporation
         ticker: MSFT
         cik: "0000789019"
+        aliases: [Microsoft]
       - name: NVIDIA Corporation
         ticker: NVDA
         cik: "0001045810"
+        aliases: [NVIDIA]
       - name: Adobe Inc.
         ticker: ADBE
         cik: "0000796343"
+        aliases: [Adobe]
 
   - id: retail
     name: Retail
@@ -37,15 +41,19 @@ sectors:
       - name: Walmart Inc.
         ticker: WMT
         cik: "0000104169"
+        aliases: [Walmart]
       - name: Target Corporation
         ticker: TGT
         cik: "0000027419"
+        aliases: [Target]
       - name: Costco Wholesale Corporation
         ticker: COST
         cik: "0000909832"
+        aliases: [Costco]
       - name: The Home Depot, Inc.
         ticker: HD
         cik: "0000354950"
+        aliases: [Home Depot]
 
   - id: logistics
     name: Logistics
@@ -56,12 +64,16 @@ sectors:
       - name: United Parcel Service, Inc.
         ticker: UPS
         cik: "0001090727"
+        aliases: [United Parcel Service]
       - name: FedEx Corporation
         ticker: FDX
         cik: "0001048911"
+        aliases: [FedEx]
       - name: Expeditors International of Washington, Inc.
         ticker: EXPD
         cik: "0000746515"
+        aliases: [Expeditors]
       - name: C.H. Robinson Worldwide, Inc.
         ticker: CHRW
         cik: "0001043277"
+        aliases: [C.H. Robinson]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import unicodedata
 from collections.abc import Iterable
 from contextlib import closing
 from pathlib import Path
@@ -34,6 +35,57 @@ _ANNUAL_METRICS = (
 )
 _MARKET_METRICS = ("share_price", "market_cap", "enterprise_value")
 
+_EXPLICIT_COMPANY_PATTERNS = (
+    re.compile(
+        r"\b(?:what\s+do\s+you\s+think\s+about|what\s+about|tell\s+me\s+about)"
+        r"\s+(?P<mention>[^?!.]+)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bwhat\s+is\b[^?!.]*?\bfor\s+(?P<mention>[^?!.]+)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bhow\s+is\s+(?P<mention>.+?)\s+performing\b",
+        re.IGNORECASE,
+    ),
+)
+_GENERIC_COMPANY_REFERENCES = {
+    "a company",
+    "the company",
+    "this company",
+    "a company in this dataset",
+    "a company in the dataset",
+    "companies in the sector",
+    "the industry",
+}
+
+
+def _normalize_match_text(value: str) -> str:
+    """Normalize Unicode, punctuation, and whitespace for bounded matching."""
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    punctuation_safe = "".join(
+        character if character.isalnum() or character == "_" else " "
+        for character in normalized
+    )
+    return " ".join(punctuation_safe.split())
+
+
+def _explicit_company_mention(query: str) -> str | None:
+    """Extract a narrow natural-language company mention without case heuristics."""
+    for pattern in _EXPLICIT_COMPANY_PATTERNS:
+        match = pattern.search(query)
+        if match is None:
+            continue
+        mention = match.group("mention").strip().rstrip("?.!,;:").strip()
+        normalized = _normalize_match_text(mention)
+        if not normalized or normalized in _GENERIC_COMPANY_REFERENCES:
+            return None
+        if len(normalized.split()) > 8:
+            return None
+        return mention
+    return None
+
 
 class RepositoryError(RuntimeError):
     """The read-only dataset could not satisfy a valid operation."""
@@ -61,6 +113,7 @@ class SectorRepository:
                 "SELECT id, name, ticker FROM companies WHERE sector_id = ? ORDER BY name",
                 (sector.value,),
             ).fetchall()
+            aliases = self._aliases_by_company(connection, sector)
             event_rows = connection.execute(
                 """
                 SELECT DISTINCT os.signal_type
@@ -110,7 +163,7 @@ class SectorRepository:
                 kind=EntityKind.COMPANY,
                 name=row["name"],
                 ticker=row["ticker"],
-                aliases=[row["ticker"]],
+                aliases=[row["ticker"], *aliases.get(row["id"], [])],
             )
             for row in company_rows
         ]
@@ -137,31 +190,66 @@ class SectorRepository:
         )
 
     def resolve_companies(self, sector: Sector, query: str) -> ResolutionResult:
-        """Resolve company names and tickers and flag explicit unknown names."""
+        """Resolve normalized catalog aliases and flag explicit unknown mentions."""
         with closing(self._connect()) as connection:
             rows = connection.execute(
                 "SELECT id, name, ticker FROM companies WHERE sector_id = ?",
                 (sector.value,),
             ).fetchall()
+            aliases = self._aliases_by_company(connection, sector)
         resolved: list[ResolvedEntity] = []
-        lowered = query.casefold()
-        for row in rows:
-            for alias in sorted((row["name"], row["ticker"]), key=len, reverse=True):
-                if re.search(rf"(?<!\w){re.escape(alias.casefold())}(?!\w)", lowered):
-                    resolved.append(ResolvedEntity(mention=alias, entity_id=row["id"]))
-                    break
+        normalized_query = _normalize_match_text(query)
+        candidates = sorted(
+            (
+                (alias, row["id"])
+                for row in rows
+                for alias in (row["name"], row["ticker"], *aliases.get(row["id"], []))
+            ),
+            key=lambda item: len(_normalize_match_text(item[0])),
+            reverse=True,
+        )
+        resolved_ids: set[str] = set()
+        for alias, entity_id in candidates:
+            normalized_alias = _normalize_match_text(alias)
+            if entity_id in resolved_ids or not normalized_alias:
+                continue
+            if re.search(
+                rf"(?<!\w){re.escape(normalized_alias)}(?!\w)", normalized_query
+            ):
+                resolved.append(ResolvedEntity(mention=alias, entity_id=entity_id))
+                resolved_ids.add(entity_id)
 
         unresolved: list[str] = []
         if not resolved:
-            explicit = re.search(
-                r"\b(?:about|for|company)\s+([A-Z][\w.&-]*(?:\s+[A-Z][\w.&-]*){0,3})",
-                query,
-            )
-            if explicit:
-                mention = explicit.group(1).rstrip("?.!,")
-                if mention not in {"This", "The", "A", "An"}:
-                    unresolved.append(mention)
+            mention = _explicit_company_mention(query)
+            if mention is not None:
+                unresolved.append(mention)
         return ResolutionResult(resolved=resolved, unresolved_mentions=unresolved)
+
+    @staticmethod
+    def _aliases_by_company(
+        connection: sqlite3.Connection, sector: Sector
+    ) -> dict[str, list[str]]:
+        """Return configured aliases, tolerating databases built before aliases existed."""
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'company_aliases'"
+        ).fetchone()
+        if exists is None:
+            return {}
+        rows = connection.execute(
+            """
+            SELECT ca.company_id, ca.alias
+            FROM company_aliases AS ca
+            JOIN companies AS c ON c.id = ca.company_id
+            WHERE c.sector_id = ?
+            ORDER BY LENGTH(ca.alias) DESC, ca.alias
+            """,
+            (sector.value,),
+        ).fetchall()
+        result: dict[str, list[str]] = {}
+        for row in rows:
+            result.setdefault(row["company_id"], []).append(row["alias"])
+        return result
 
     def query_observations(
         self,

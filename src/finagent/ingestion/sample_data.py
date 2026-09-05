@@ -108,6 +108,10 @@ def build_sample_database(
                             company.padded_cik,
                         ),
                     )
+                    connection.executemany(
+                        "INSERT INTO company_aliases(company_id, alias) VALUES (?, ?)",
+                        ((company_id, alias) for alias in company.aliases),
+                    )
                     annual_count += _insert_annual_snapshots(
                         connection, sector, company, company_id, company_number
                     )

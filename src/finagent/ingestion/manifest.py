@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +16,7 @@ class CompanySpec:
     name: str
     ticker: str
     cik: str
+    aliases: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def padded_cik(self) -> str:
@@ -114,6 +115,7 @@ def load_manifest(path: Path | str) -> SourceManifest:
                     name=_required_text(raw_company, "name"),
                     ticker=ticker,
                     cik=padded_cik,
+                    aliases=_optional_aliases(raw_company, ticker),
                 )
             )
 
@@ -140,3 +142,13 @@ def _required_text(mapping: dict[str, Any], key: str) -> str:
     if not isinstance(value, (str, int)) or not str(value).strip():
         raise ValueError(f"missing or invalid manifest field: {key}")
     return str(value).strip()
+
+
+def _optional_aliases(mapping: dict[str, Any], ticker: str) -> tuple[str, ...]:
+    """Validate optional configured company aliases."""
+    aliases = mapping.get("aliases", [])
+    if not isinstance(aliases, list) or not all(
+        isinstance(alias, str) and alias.strip() for alias in aliases
+    ):
+        raise ValueError(f"aliases for {ticker} must be a list of non-empty strings")
+    return tuple(dict.fromkeys(alias.strip() for alias in aliases))

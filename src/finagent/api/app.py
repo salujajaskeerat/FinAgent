@@ -34,7 +34,8 @@ from finagent.core.errors import (
     RateLimitError,
 )
 from finagent.core.persona_policy import PersonaPolicyStore
-from finagent.gateways.llm import build_llm_gateway
+from finagent.gateways.entity_resolver import build_entity_resolver
+from finagent.gateways.llm import LlmSettings, build_llm_gateway
 from finagent.gateways.mcp_client import McpDataGateway, StreamableHttpToolCaller
 
 logger = logging.getLogger("finagent.api")
@@ -47,11 +48,13 @@ def build_service() -> AnalysisService:
     """Build the default application service from environment configuration."""
     mcp_url = os.getenv("FINAGENT_MCP_URL", "http://127.0.0.1:8001/mcp")
     timeout = float(os.getenv("FINAGENT_ANALYSIS_TIMEOUT_SECONDS", "45"))
+    llm_settings = LlmSettings.from_env()
     return AnalysisService(
         data_gateway=McpDataGateway(StreamableHttpToolCaller(mcp_url)),
-        llm_gateway=build_llm_gateway(),
+        llm_gateway=build_llm_gateway(llm_settings),
         policies=PersonaPolicyStore.load(),
         deadline_seconds=timeout,
+        entity_resolver=build_entity_resolver(llm_settings),
     )
 
 

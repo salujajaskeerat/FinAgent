@@ -17,7 +17,9 @@ from finagent.contracts.api import (
     Sector,
     SectorOption,
 )
+from finagent.contracts.entity_resolution import EntityResolutionStatus
 from finagent.contracts.mcp import (
+    CatalogEntity,
     DatasetCatalog,
     EntityKind,
     EventResult,
@@ -27,7 +29,7 @@ from finagent.core.errors import AnalysisTimeoutError
 from finagent.core.grounding import grounding_issues
 from finagent.core.models import EvidenceBundle, RetrievalPlan
 from finagent.core.persona_policy import PersonaPolicyStore
-from finagent.core.ports import DataGateway, LlmGateway
+from finagent.core.ports import DataGateway, EntityResolver, LlmGateway
 from finagent.core.state import AnalysisState, StateTrace
 
 
@@ -40,11 +42,13 @@ class AnalysisService:
         llm_gateway: LlmGateway,
         policies: PersonaPolicyStore,
         deadline_seconds: float = 45.0,
+        entity_resolver: EntityResolver | None = None,
     ) -> None:
         self._data = data_gateway
         self._llm = llm_gateway
         self._policies = policies
         self._deadline_seconds = deadline_seconds
+        self._entity_resolver = entity_resolver
 
     async def catalog(self, sector: Sector) -> CatalogResponse:
         """Return UI configuration and data coverage for a sector."""
@@ -118,32 +122,22 @@ class AnalysisService:
             self._data.get_catalog(request.sector),
             self._data.resolve_companies(request.sector, request.query),
         )
-        if resolution.unresolved_mentions:
-            trace.move(AnalysisState.COMPLETED)
-            supported = ", ".join(
-                entity.name
-                for entity in catalog.entities
-                if entity.kind is EntityKind.COMPANY
-            )
-            return AnalysisResponse(
-                request_id=request_id,
-                status=AnalysisStatus.OUT_OF_SCOPE,
-                persona=request.persona,
-                sector=request.sector,
-                answer_markdown=(
-                    "The requested company is outside this dataset, so I cannot provide a "
-                    "data-grounded opinion."
-                ),
-                evidence_status=EvidenceStatus.NONE,
-                limitations=[
-                    f"Supported companies for {request.sector.value}: {supported}."
-                ],
-            )
-
         company_entities = [
             entity for entity in catalog.entities if entity.kind is EntityKind.COMPANY
         ]
         target_ids = [item.entity_id for item in resolution.resolved]
+        if resolution.unresolved_mentions:
+            fallback_id = await self._fallback_entity_id(
+                request.query,
+                request.sector,
+                company_entities,
+            )
+            if fallback_id is not None:
+                target_ids = [fallback_id]
+            else:
+                trace.move(AnalysisState.COMPLETED)
+                return self._out_of_scope(request, request_id, company_entities)
+
         if not target_ids:
             target_ids = [entity.entity_id for entity in company_entities]
         if not target_ids:
@@ -227,6 +221,55 @@ class AnalysisService:
             ),
             data_as_of=self._data_as_of(observations, events),
             limitations=limitations,
+        )
+
+    async def _fallback_entity_id(
+        self,
+        query: str,
+        sector: Sector,
+        candidates: list[CatalogEntity],
+    ) -> str | None:
+        """Accept one high-confidence model match from the supplied catalog only."""
+        if self._entity_resolver is None:
+            return None
+        try:
+            result = await self._entity_resolver.resolve(query, sector, candidates)
+        except Exception:  # noqa: BLE001 - optional resolution must fail closed.
+            return None
+        if result.status is not EntityResolutionStatus.MATCHED:
+            return None
+        match = result.matches[0]
+        allowed_ids = {candidate.entity_id for candidate in candidates}
+        mention_is_from_query = match.mention.casefold() in query.casefold()
+        if (
+            match.entity_id not in allowed_ids
+            or match.confidence < 0.85
+            or not mention_is_from_query
+        ):
+            return None
+        return match.entity_id
+
+    @staticmethod
+    def _out_of_scope(
+        request: AnalysisRequest,
+        request_id: UUID,
+        company_entities: list[CatalogEntity],
+    ) -> AnalysisResponse:
+        """Return the stable response for an unresolved explicit company."""
+        supported = ", ".join(entity.name for entity in company_entities)
+        return AnalysisResponse(
+            request_id=request_id,
+            status=AnalysisStatus.OUT_OF_SCOPE,
+            persona=request.persona,
+            sector=request.sector,
+            answer_markdown=(
+                "The requested company is outside this dataset, so I cannot provide a "
+                "data-grounded opinion."
+            ),
+            evidence_status=EvidenceStatus.NONE,
+            limitations=[
+                f"Supported companies for {request.sector.value}: {supported}."
+            ],
         )
 
     async def _get_observations(

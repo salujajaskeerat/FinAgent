@@ -3,6 +3,8 @@
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from finagent.contracts.api import Sector
 from finagent.ingestion.builder import build_database
 from finagent.mcp_server.repository import SectorRepository
@@ -75,6 +77,99 @@ def test_repository_resolves_known_and_explicit_unknown_companies(
 
     assert known.resolved[0].mention == "EXM"
     assert unknown.unresolved_mentions == ["SpaceX"]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "What about Example Systems, Inc.?",
+        "What about example systems, inc.?",
+        "What about Example Systems Inc?",
+        "What about Example   Systems,   Inc.?",
+        "What about EXM?",
+        "What about exm?",
+        "Tell me about Example Tech.",
+    ],
+)
+def test_repository_resolution_normalizes_catalog_aliases(
+    tmp_path: Path, query: str
+) -> None:
+    """Match names, tickers, and configured aliases without case sensitivity."""
+    result = _repository(tmp_path).resolve_companies(Sector.TECH, query)
+
+    assert [item.entity_id for item in result.resolved] == ["sec:0000000001"]
+    assert result.unresolved_mentions == []
+
+
+@pytest.mark.parametrize("query", ["What about EX?", "Tell me about App."])
+def test_repository_resolution_respects_token_boundaries(
+    tmp_path: Path, query: str
+) -> None:
+    """Do not resolve a token that is merely a prefix of a catalog alias."""
+    result = _repository(tmp_path).resolve_companies(Sector.TECH, query)
+
+    assert result.resolved == []
+
+
+def test_repository_does_not_match_app_as_apple(tmp_path: Path) -> None:
+    """Apply token boundaries to configured aliases, not only tickers."""
+    database = tmp_path / "finagent.db"
+    build_database(
+        FIXTURES / "source_manifest.yaml",
+        FIXTURES / "raw" / "sec",
+        database,
+    )
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "INSERT INTO company_aliases(company_id, alias) VALUES (?, ?)",
+            ("sec:0000000001", "Apple"),
+        )
+        connection.commit()
+    repository = SectorRepository(database)
+
+    assert repository.resolve_companies(Sector.TECH, "Tell me about Apple.").resolved
+    assert (
+        repository.resolve_companies(Sector.TECH, "Tell me about App.").resolved == []
+    )
+
+
+@pytest.mark.parametrize(
+    ("query", "mention"),
+    [
+        ("What do you think about SpaceX?", "SpaceX"),
+        ("what do you think about spacex?", "spacex"),
+        ("Tell me about spacex.", "spacex"),
+        ("What is the revenue for spacex!", "spacex"),
+        ("How is spacex performing?", "spacex"),
+    ],
+)
+def test_repository_detects_explicit_unknown_without_capitalization(
+    tmp_path: Path, query: str, mention: str
+) -> None:
+    """Detect explicit absent companies using phrasing rather than capitalization."""
+    result = _repository(tmp_path).resolve_companies(Sector.TECH, query)
+
+    assert result.resolved == []
+    assert result.unresolved_mentions == [mention]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Compare the companies' margins.",
+        "Which company is strongest?",
+        "Compare companies in the dataset.",
+        "What are the risks in this sector?",
+        "What is the latest headcount for a company in this dataset?",
+        "What is the latest headcount or hiring signal for a company in this dataset?",
+    ],
+)
+def test_repository_keeps_broad_queries_in_scope(tmp_path: Path, query: str) -> None:
+    """Leave broad sector questions unresolved so all sector companies are eligible."""
+    result = _repository(tmp_path).resolve_companies(Sector.TECH, query)
+
+    assert result.resolved == []
+    assert result.unresolved_mentions == []
 
 
 def test_repository_expands_derived_source_lineage(tmp_path: Path) -> None:

@@ -177,6 +177,16 @@ plan, the application restricts that plan to catalog values and performs MCP
 queries, then Gemini analyzes only the retrieved evidence. The application
 validates every returned company and source identifier before responding.
 
+Company resolution is deterministic first: legal names, tickers, and configured
+aliases are normalized and matched on token boundaries. Only an unresolved,
+explicit company reference can trigger one short LLM fallback. That resolver sees
+only the selected sector's catalog and can select only a catalog-provided ID;
+invented IDs, confidence below `0.85`, ambiguous results, malformed output, and
+provider failures are rejected. Broad sector questions still analyze the sector,
+while unresolved explicit companies return `out_of_scope` before planning,
+retrieval, or synthesis. Fuzzy-search packages, embeddings, and unrestricted LLM
+entity discovery are intentionally out of scope.
+
 [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing) currently
 lists a limited free tier for Gemini 2.5 Flash-Lite. Google states that free-tier
 prompts and responses may be used to improve its products, so this demo should

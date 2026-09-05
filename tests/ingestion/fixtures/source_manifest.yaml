@@ -9,3 +9,5 @@ sectors:
       - name: Example Systems, Inc.
         ticker: EXM
         cik: "1"
+        aliases:
+          - Example Tech

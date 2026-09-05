@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import Protocol
 
 from finagent.contracts.api import AnalysisRequest, Sector
+from finagent.contracts.entity_resolution import EntityResolution
 from finagent.contracts.mcp import (
+    CatalogEntity,
     DatasetCatalog,
     EventResult,
     ObservationResult,
@@ -78,4 +80,17 @@ class LlmGateway(Protocol):
         issues: list[str],
     ) -> DraftAnalysis:
         """Repair one invalid draft without retrieving new evidence."""
+        ...
+
+
+class EntityResolver(Protocol):
+    """Narrow model boundary for selecting from a supplied company catalog."""
+
+    async def resolve(
+        self,
+        query: str,
+        sector: Sector,
+        candidates: list[CatalogEntity],
+    ) -> EntityResolution:
+        """Resolve an explicit mention using only the supplied candidates."""
         ...

@@ -15,3 +15,4 @@ def test_load_manifest_normalizes_cik_and_ticker() -> None:
     assert sector.id == "tech"
     assert company.ticker == "EXM"
     assert company.padded_cik == "0000000001"
+    assert company.aliases == ("Example Tech",)

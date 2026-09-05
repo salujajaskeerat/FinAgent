@@ -55,6 +55,32 @@ queries itself. After synthesis, deterministic validation rejects company or
 source identifiers that were not present in retrieved evidence. The fake
 adapter remains available only as an explicit offline/test mode.
 
+### Entity resolution is deterministic first
+
+The MCP repository first matches normalized legal names, tickers, and configured
+aliases. If that fails, its narrow phrasing detector distinguishes an explicit
+company mention from a broad sector question. Only an explicit unresolved mention
+may invoke the typed LLM resolver, which receives the selected sector's company
+catalog and no data tools. `AnalysisService` accepts exactly one catalog ID at
+confidence `>= 0.85`; ambiguous, low-confidence, invented, malformed, timed-out,
+or unavailable results exit as `out_of_scope` before planning and synthesis.
+
+```mermaid
+flowchart LR
+    Query["User query"] --> Exact{"Deterministic name,<br/>ticker, or alias match?"}
+    Exact -->|Yes| Canonical["Canonical catalog ID"]
+    Exact -->|No| Explicit{"Explicit company<br/>reference?"}
+    Explicit -->|No: broad question| Broad["Selected-sector companies"]
+    Explicit -->|Yes| Resolver["One constrained LLM<br/>resolution attempt"]
+    Catalog["Selected-sector catalog IDs"] --> Resolver
+    Resolver --> Validate{"Exactly one catalog ID<br/>and confidence >= 0.85?"}
+    Validate -->|Yes| Canonical
+    Validate -->|No| Out["out_of_scope<br/>no planning or synthesis"]
+```
+
+Fuzzy-search dependencies, embeddings, and unrestricted model-driven entity
+discovery are not part of this design.
+
 ### Evidence coverage over subjective confidence
 
 Responses report evidence status, dates, sources, unsupported-claim counts, and

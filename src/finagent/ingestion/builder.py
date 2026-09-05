@@ -41,6 +41,12 @@ CREATE TABLE companies (
     cik TEXT NOT NULL UNIQUE
 );
 
+CREATE TABLE company_aliases (
+    company_id TEXT NOT NULL REFERENCES companies(id),
+    alias TEXT NOT NULL,
+    PRIMARY KEY(company_id, alias)
+);
+
 CREATE TABLE sources (
     id TEXT PRIMARY KEY,
     publisher TEXT NOT NULL,
@@ -275,6 +281,10 @@ def build_database(
                             company.ticker,
                             company.padded_cik,
                         ),
+                    )
+                    connection.executemany(
+                        "INSERT INTO company_aliases(company_id, alias) VALUES (?, ?)",
+                        ((company_id, alias) for alias in company.aliases),
                     )
                     cache_dir = cache_root / company.padded_cik
                     submissions_path = cache_dir / "submissions.json"
