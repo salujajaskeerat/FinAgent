@@ -1,0 +1,28 @@
+flowchart TB
+    subgraph BuildTime["Offline data build"]
+        Sources["SEC filings<br/>IR releases<br/>dated market source"]
+        Manifest["Curated source manifest"]
+        Builder["Normalize, validate<br/>and build database"]
+        DB[("Reproducible SQLite database")]
+
+        Sources --> Manifest
+        Manifest --> Builder
+        Builder --> DB
+    end
+
+    subgraph Runtime["Runtime"]
+        Human["Human user"] --> UI["Thin Streamlit UI"]
+        Consumer["External API consumer"] --> API["FastAPI"]
+
+        UI -->|"HTTP only"| API
+        API --> Agent["AnalysisService<br/>single bounded workflow"]
+
+        Agent --> Policy["Persona policy registry"]
+        Agent --> Calculator["Deterministic calculations"]
+        Agent --> LLM["LLM adapter"]
+        Agent --> MCPClient["MCP client"]
+
+        MCPClient -->|"MCP Streamable HTTP"| MCPServer["MCP data server"]
+        MCPServer --> Repository["Read-only repository"]
+        Repository --> DB
+    end

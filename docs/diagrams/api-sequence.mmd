@@ -1,0 +1,38 @@
+sequenceDiagram
+    actor User
+    participant Client as "Streamlit or API client"
+    participant API as "FastAPI"
+    participant Agent as "AnalysisService"
+    participant MCP as "MCP data service"
+    participant DB as "SQLite"
+    participant LLM as "LLM adapter"
+    participant Validator as "Grounding validator"
+
+    User->>Client: Submit query, persona, sector
+    Client->>API: POST /v1/analyses
+    API->>API: Validate and assign request ID
+    API->>Agent: Analyze typed request
+
+    Agent->>MCP: get_catalog and resolve_companies
+    MCP->>DB: Query supported scope
+    DB-->>MCP: Canonical entities
+    MCP-->>Agent: Typed scope result
+
+    alt Unsupported company
+        Agent-->>API: out_of_scope
+    else Supported scope
+        Agent->>MCP: query_observations
+        Agent->>MCP: query_events
+        MCP->>DB: Parameterized reads
+        DB-->>MCP: Facts, events, and sources
+        MCP-->>Agent: Typed evidence
+        Agent->>Agent: Calculate features and coverage
+        Agent->>LLM: Evidence and persona policy
+        LLM-->>Agent: Typed findings
+        Agent->>Validator: Validate entities and evidence IDs
+        Validator-->>Agent: Valid or one repair request
+        Agent-->>API: Validated response
+    end
+
+    API-->>Client: JSON and X-Request-ID
+    Client-->>User: Answer, sources, dates, limitations

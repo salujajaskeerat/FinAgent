@@ -1,0 +1,192 @@
+{
+  "cik": 1,
+  "entityName": "Example Systems, Inc.",
+  "facts": {
+    "us-gaap": {
+      "RevenueFromContractWithCustomerExcludingAssessedTax": {
+        "units": {
+          "USD": [
+            {
+              "start": "2023-01-01",
+              "end": "2023-12-31",
+              "val": 1000,
+              "accn": "0000000001-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-16"
+            },
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "val": 1200,
+              "accn": "0000000001-25-000001",
+              "fy": 2024,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-02-15"
+            }
+          ]
+        }
+      },
+      "OperatingIncomeLoss": {
+        "units": {
+          "USD": [
+            {
+              "start": "2023-01-01",
+              "end": "2023-12-31",
+              "val": 100,
+              "accn": "0000000001-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-16"
+            },
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "val": 180,
+              "accn": "0000000001-25-000001",
+              "fy": 2024,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-02-15"
+            }
+          ]
+        }
+      },
+      "NetCashProvidedByUsedInOperatingActivities": {
+        "units": {
+          "USD": [
+            {
+              "start": "2023-01-01",
+              "end": "2023-12-31",
+              "val": 160,
+              "accn": "0000000001-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-16"
+            },
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "val": 220,
+              "accn": "0000000001-25-000001",
+              "fy": 2024,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-02-15"
+            }
+          ]
+        }
+      },
+      "PaymentsToAcquirePropertyPlantAndEquipment": {
+        "units": {
+          "USD": [
+            {
+              "start": "2023-01-01",
+              "end": "2023-12-31",
+              "val": 40,
+              "accn": "0000000001-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-16"
+            },
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "val": 50,
+              "accn": "0000000001-25-000001",
+              "fy": 2024,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-02-15"
+            }
+          ]
+        }
+      },
+      "CashAndCashEquivalentsAtCarryingValue": {
+        "units": {
+          "USD": [
+            {
+              "end": "2023-12-31",
+              "val": 300,
+              "accn": "0000000001-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-16"
+            },
+            {
+              "end": "2024-12-31",
+              "val": 350,
+              "accn": "0000000001-25-000001",
+              "fy": 2024,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-02-15"
+            }
+          ]
+        }
+      },
+      "LongTermDebtCurrent": {
+        "units": {
+          "USD": [
+            {
+              "end": "2024-12-31",
+              "val": 25,
+              "accn": "0000000001-25-000001",
+              "fy": 2024,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-02-15"
+            }
+          ]
+        }
+      },
+      "LongTermDebtNoncurrent": {
+        "units": {
+          "USD": [
+            {
+              "end": "2024-12-31",
+              "val": 175,
+              "accn": "0000000001-25-000001",
+              "fy": 2024,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-02-15"
+            }
+          ]
+        }
+      }
+    },
+    "dei": {
+      "EntityNumberOfEmployees": {
+        "units": {
+          "employees": [
+            {
+              "end": "2023-12-31",
+              "val": 900,
+              "accn": "0000000001-24-000001",
+              "fy": 2023,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2024-02-16"
+            },
+            {
+              "end": "2024-12-31",
+              "val": 950,
+              "accn": "0000000001-25-000001",
+              "fy": 2024,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-02-15"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

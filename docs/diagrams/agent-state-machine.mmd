@@ -1,0 +1,34 @@
+stateDiagram-v2
+    [*] --> ValidateRequest
+
+    ValidateRequest --> InvalidRequest: Invalid persona or sector
+    ValidateRequest --> LoadCatalog: Valid request
+
+    LoadCatalog --> DependencyFailure: MCP unavailable
+    LoadCatalog --> ParseQuestion: Catalog loaded
+
+    ParseQuestion --> ResolveEntities
+    ResolveEntities --> OutOfScope: Unsupported company
+    ResolveEntities --> BuildEvidencePlan: Scope supported
+
+    BuildEvidencePlan --> QueryMCP
+    QueryMCP --> DependencyFailure: Query failed
+    QueryMCP --> EvidenceGate: Evidence returned
+
+    EvidenceGate --> InsufficientData: Mandatory facts absent
+    EvidenceGate --> CalculateFeatures: Evidence usable
+
+    CalculateFeatures --> ApplyPersona
+    ApplyPersona --> ValidateOutput
+
+    ValidateOutput --> Complete: References valid
+    ValidateOutput --> RepairOnce: Invalid evidence reference
+    RepairOnce --> Complete: Repaired
+    RepairOnce --> SafePartial: Still invalid
+
+    InvalidRequest --> [*]
+    OutOfScope --> [*]
+    InsufficientData --> [*]
+    DependencyFailure --> [*]
+    SafePartial --> [*]
+    Complete --> [*]

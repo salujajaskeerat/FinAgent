@@ -1,0 +1,50 @@
+mutual_fund_analyst:
+  label: Mutual Fund Analyst
+  description: Long-only, benchmark-relative analysis focused on durable growth and portfolio fit.
+  horizon: 3-5 years
+  required_metrics:
+    - revenue
+    - operating_margin
+    - free_cash_flow
+    - market_cap
+  event_kinds:
+    - guidance
+    - headcount
+  required_sections:
+    - Benchmark-relative view
+    - Growth durability
+    - Portfolio fit and downside
+equity_analyst:
+  label: Equity Analyst
+  description: Fundamentals-led analysis of earnings, margins, positioning, catalysts, and valuation.
+  horizon: 12-18 months
+  required_metrics:
+    - revenue
+    - operating_income
+    - operating_margin
+    - enterprise_value
+  event_kinds:
+    - guidance
+    - headcount
+  required_sections:
+    - Earnings and margins
+    - Valuation
+    - Catalysts and risks
+pe_analyst:
+  label: PE Analyst
+  description: Deal and operations analysis focused on cash flow, leverage, value creation, and exit.
+  horizon: 3-5 years
+  required_metrics:
+    - enterprise_value
+    - free_cash_flow
+    - total_debt
+    - cash_and_equivalents
+    - capital_expenditure
+  event_kinds:
+    - guidance
+    - headcount
+    - restructuring
+  required_sections:
+    - Entry and leverage case
+    - Operational value creation
+    - Exit and diligence gaps

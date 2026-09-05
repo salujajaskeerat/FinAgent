@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "finagent-assignment"
+version = "0.1.0"
+description = "A persona-configurable, MCP-grounded financial analysis agent."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.116,<1",
+  "mcp>=2,<3",
+  "pydantic>=2.11,<3",
+  "PyYAML>=6.0,<7",
+  "streamlit>=1.40,<2",
+  "uvicorn>=0.35,<1",
+]
+
+[project.optional-dependencies]
+test = [
+  "httpx>=0.28,<1",
+  "pytest>=8.4,<10",
+]
+
+[project.scripts]
+finagent-api = "finagent.api.app:run"
+finagent-mcp = "finagent.mcp_server.server:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/finagent"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests", "ui/tests"]
+
+[tool.ruff.lint]
+# FastAPI declares dependencies through function-call defaults by design.
+ignore = ["B008"]

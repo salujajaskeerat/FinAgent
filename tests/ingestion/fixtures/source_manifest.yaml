@@ -1,0 +1,11 @@
+version: 1
+sectors:
+  - id: tech
+    name: Technology
+    benchmark:
+      name: Test Technology Benchmark
+      ticker: TEST
+    companies:
+      - name: Example Systems, Inc.
+        ticker: EXM
+        cik: "1"

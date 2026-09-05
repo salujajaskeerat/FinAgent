@@ -1,0 +1,13 @@
+{
+  "cik": "1",
+  "name": "Example Systems, Inc.",
+  "filings": {
+    "recent": {
+      "accessionNumber": ["0000000001-25-000001", "0000000001-24-000001"],
+      "filingDate": ["2025-02-15", "2024-02-16"],
+      "reportDate": ["2024-12-31", "2023-12-31"],
+      "form": ["10-K", "10-K"],
+      "primaryDocument": ["example-20241231.htm", "example-20231231.htm"]
+    }
+  }
+}

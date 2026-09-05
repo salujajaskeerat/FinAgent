@@ -1,0 +1,67 @@
+version: 1
+
+# Scope is deliberately small: four companies in each of three sectors. The SEC
+# Companyfacts and submissions URLs are derived from each CIK by the downloader.
+sources:
+  sec_edgar:
+    publisher: U.S. Securities and Exchange Commission
+    documentation_url: https://www.sec.gov/search-filings/edgar-application-programming-interfaces
+    submissions_url_template: https://data.sec.gov/submissions/CIK{cik}.json
+    companyfacts_url_template: https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json
+sectors:
+  - id: tech
+    name: Technology
+    benchmark:
+      name: Technology Select Sector SPDR Fund
+      ticker: XLK
+    companies:
+      - name: Apple Inc.
+        ticker: AAPL
+        cik: "0000320193"
+      - name: Microsoft Corporation
+        ticker: MSFT
+        cik: "0000789019"
+      - name: NVIDIA Corporation
+        ticker: NVDA
+        cik: "0001045810"
+      - name: Adobe Inc.
+        ticker: ADBE
+        cik: "0000796343"
+
+  - id: retail
+    name: Retail
+    benchmark:
+      name: SPDR S&P Retail ETF
+      ticker: XRT
+    companies:
+      - name: Walmart Inc.
+        ticker: WMT
+        cik: "0000104169"
+      - name: Target Corporation
+        ticker: TGT
+        cik: "0000027419"
+      - name: Costco Wholesale Corporation
+        ticker: COST
+        cik: "0000909832"
+      - name: The Home Depot, Inc.
+        ticker: HD
+        cik: "0000354950"
+
+  - id: logistics
+    name: Logistics
+    benchmark:
+      name: SPDR S&P Transportation ETF
+      ticker: XTN
+    companies:
+      - name: United Parcel Service, Inc.
+        ticker: UPS
+        cik: "0001090727"
+      - name: FedEx Corporation
+        ticker: FDX
+        cik: "0001048911"
+      - name: Expeditors International of Washington, Inc.
+        ticker: EXPD
+        cik: "0000746515"
+      - name: C.H. Robinson Worldwide, Inc.
+        ticker: CHRW
+        cik: "0001043277"
