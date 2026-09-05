@@ -6,12 +6,11 @@ across Technology, Retail, and Logistics. Runtime data access is isolated behind
 four typed Model Context Protocol (MCP) tools, and both the Streamlit UI and
 external consumers use the same FastAPI contract.
 
-This repository is at the first implementation milestone. It includes the
-architecture, typed contracts, deterministic workflow, MCP server/client,
-purpose-built SQLite repository, fixture-friendly SEC ingestion, thin UI, and
-offline tests. The default LLM adapter is intentionally fake: it proves the
-plumbing without claiming to produce investment research. A production model
-adapter and curated market/benchmark records are later milestones.
+This repository now contains an executable vertical slice: FastAPI calls the
+bounded analysis service, which reaches a separate MCP Streamable HTTP process
+and a read-only SQLite database. The integration suite proves that boundary
+with deterministic fixture data and a fake LLM. A production model adapter and
+curated market/benchmark records remain later milestones.
 
 ## Architecture
 
@@ -169,9 +168,13 @@ mode by the MCP service.
 
 ```bash
 uv run pytest
+uv run pytest -m integration
 python -m compileall -q src tests ui
 git diff --check
 ```
+
+The integration marker starts the real MCP HTTP server on an ephemeral
+localhost port and requires no network access, API key, or prebuilt database.
 
 The current tests cover:
 
@@ -180,6 +183,10 @@ The current tests cover:
 - source-link grounding;
 - deterministic out-of-scope and insufficient-data outcomes;
 - latest headcount selection;
+- real MCP SDK calls across all four tools over Streamable HTTP;
+- the complete API -> analysis -> MCP -> read-only SQLite path;
+- unknown-company early exit before any LLM planning or synthesis call;
+- rejection of unknown and cross-sector entity identifiers;
 - purpose-built schema-to-MCP mapping;
 - architectural import boundaries;
 - SEC identity, rate limiting, caching, and idempotent offline builds; and

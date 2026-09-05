@@ -24,6 +24,10 @@ class ToolCaller(Protocol):
         ...
 
 
+class McpToolError(ValueError):
+    """A valid MCP request was rejected by the data tool."""
+
+
 class StreamableHttpToolCaller:
     """MCP Streamable HTTP caller with a bounded transient retry."""
 
@@ -56,6 +60,8 @@ class StreamableHttpToolCaller:
             try:
                 async with asyncio.timeout(self._timeout_seconds):
                     return await self._call_once(name, arguments)
+            except McpToolError:
+                raise
             except (OSError, TimeoutError, RuntimeError) as exc:
                 last_error = exc
                 if attempt == 0:
@@ -74,7 +80,13 @@ class StreamableHttpToolCaller:
         async with Client(self._url) as client:
             result = await client.call_tool(name, dict(arguments))
         if result.is_error:
-            raise RuntimeError(f"MCP tool {name!r} returned an error")
+            details = "; ".join(
+                text
+                for item in result.content
+                if isinstance((text := getattr(item, "text", None)), str)
+            )
+            suffix = f": {details}" if details else ""
+            raise McpToolError(f"MCP tool {name!r} rejected the request{suffix}")
         structured = result.structured_content
         if isinstance(structured, dict):
             return structured

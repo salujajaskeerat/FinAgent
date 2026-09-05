@@ -14,6 +14,28 @@ claims:
 The priority is a reliable vertical slice and demonstrable system boundaries,
 not broad market coverage. Target roughly 35–50 well-sourced records per sector.
 
+## Current Status
+
+The real runtime boundary is implemented and integration-tested:
+
+```text
+FastAPI -> AnalysisService -> MCP Streamable HTTP -> read-only SQLite
+```
+
+The tests exercise all four MCP tools through the official client, verify the
+latest dated headcount signal and its source, reject unknown and cross-sector
+IDs, and prove that an out-of-scope company exits before LLM planning or
+synthesis. The fixture's explicit quality caveat is preserved as a `partial`
+evidence status. Run this milestone independently with:
+
+```bash
+uv run pytest -m integration
+```
+
+The next delivery focus is M1 data depth: a small, well-sourced evidence set for
+all three sectors. Production-model work, richer UI, and deployment remain out
+of scope until that evidence layer is reproducible.
+
 ## Delivery Principles
 
 - Keep orchestration explicit and bounded; do not introduce a graph framework

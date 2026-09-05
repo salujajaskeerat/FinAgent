@@ -32,6 +32,9 @@ packages = ["src/finagent"]
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests", "ui/tests"]
+markers = [
+  "integration: exercises real process or protocol boundaries",
+]
 
 [tool.ruff.lint]
 # FastAPI declares dependencies through function-call defaults by design.

@@ -58,21 +58,42 @@ class FakeLlmGateway:
             f"### {section}\nEvidence retrieved for the configured {policy.label} lens."
             for section in policy.required_sections
         )
-        finding = Finding(
-            text=(
-                f"The dataset returned {len(evidence.observations)} observations and "
-                f"{len(evidence.events)} operating signals for analysis."
-            ),
-            company_ids=evidence.company_ids,
-            source_ids=source_ids,
-        )
+        findings = [
+            Finding(
+                text=(
+                    f"The dataset returned {len(evidence.observations)} observations and "
+                    f"{len(evidence.events)} operating signals for analysis."
+                ),
+                company_ids=evidence.company_ids,
+                source_ids=source_ids,
+            )
+        ]
+        if evidence.events:
+            latest_event = max(
+                evidence.events,
+                key=lambda item: (
+                    item.occurred_at or item.published_at,
+                    item.published_at,
+                ),
+            )
+            findings.append(
+                Finding(
+                    text=(
+                        f"Latest {latest_event.event_kind} signal: "
+                        f"{latest_event.summary} "
+                        f"(observed {latest_event.occurred_at or latest_event.published_at})."
+                    ),
+                    company_ids=[latest_event.entity_id],
+                    source_ids=[latest_event.source_id],
+                )
+            )
         return DraftAnalysis(
             answer_markdown=(
                 f"## {policy.label} view\n\n{sections}\n\n"
                 "This deterministic fake gateway validates plumbing only; configure a real "
                 "LLM adapter for substantive investment analysis."
             ),
-            findings=[finding],
+            findings=findings,
         )
 
     async def repair(
