@@ -45,6 +45,16 @@ The workflow has explicit states, no model-generated SQL, no autonomous web
 search, and at most one constrained output repair. Derived financial ratios are
 calculated by deterministic code before LLM synthesis.
 
+### Gemini is a constrained reasoning adapter
+
+The production adapter uses Gemini for two typed operations: proposing a small
+retrieval plan and synthesizing a source-linked draft. Gemini receives no MCP,
+Google Search, URL, SQL, or function tools. `AnalysisService` intersects every
+proposed entity, metric, and event with the MCP catalog before performing the
+queries itself. After synthesis, deterministic validation rejects company or
+source identifiers that were not present in retrieved evidence. The fake
+adapter remains available only as an explicit offline/test mode.
+
 ### Evidence coverage over subjective confidence
 
 Responses report evidence status, dates, sources, unsupported-claim counts, and
@@ -73,7 +83,7 @@ flowchart TB
         API --> Agent["AnalysisService<br/>single bounded workflow"]
         Agent --> Policy["Persona policy registry"]
         Agent --> Calculator["Deterministic calculations"]
-        Agent --> LLM["LLM adapter"]
+        Agent --> LLM["Gemini structured-output adapter<br/>or explicit offline fake"]
         Agent --> MCPClient["MCP client"]
         MCPClient -->|"MCP Streamable HTTP"| MCPServer["MCP data server"]
         MCPServer --> Repository["Read-only repository"]
@@ -134,7 +144,12 @@ sequenceDiagram
     User->>Client: Submit query, persona, sector
     Client->>API: POST /v1/analyses
     API->>Agent: Analyze typed request
-    Agent->>MCP: Resolve scope and query evidence
+    Agent->>MCP: Resolve scope and load catalog
+    MCP-->>Agent: Canonical entities and allowlists
+    Agent->>LLM: Question, persona, catalog allowlists
+    LLM-->>Agent: Typed retrieval plan
+    Agent->>Agent: Constrain plan to catalog values
+    Agent->>MCP: Query allowlisted evidence
     MCP->>DB: Parameterized read
     DB-->>MCP: Facts, events, sources
     MCP-->>Agent: Typed evidence

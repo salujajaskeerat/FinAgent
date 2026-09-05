@@ -21,6 +21,9 @@ sequenceDiagram
     alt Unsupported company
         Agent-->>API: out_of_scope
     else Supported scope
+        Agent->>LLM: Question, persona, catalog allowlists
+        LLM-->>Agent: Typed retrieval plan
+        Agent->>Agent: Constrain plan to catalog values
         Agent->>MCP: query_observations
         Agent->>MCP: query_events
         MCP->>DB: Parameterized reads

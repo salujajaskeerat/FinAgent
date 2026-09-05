@@ -9,8 +9,10 @@ description = "A persona-configurable, MCP-grounded financial analysis agent."
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.116,<1",
+  "google-genai>=1.39,<2",
   "mcp>=2,<3",
   "pydantic>=2.11,<3",
+  "python-dotenv>=1.1,<2",
   "PyYAML>=6.0,<7",
   "streamlit>=1.40,<2",
   "uvicorn>=0.35,<1",
@@ -34,6 +36,7 @@ addopts = "-q"
 testpaths = ["tests", "ui/tests"]
 markers = [
   "integration: exercises real process or protocol boundaries",
+  "live: makes an opt-in request to an external service",
 ]
 
 [tool.ruff.lint]

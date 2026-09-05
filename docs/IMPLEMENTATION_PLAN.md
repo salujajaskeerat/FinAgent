@@ -37,8 +37,9 @@ caches submissions, Companyfacts, and immutable annual filings; the offline
 builder populates financials, headcount, filing-disclosed prices, and
 source-lineaged peer medians; and a read-only audit verifies coverage and
 provenance. The next data task is an explicitly licensed price/valuation adapter
-for fields that annual filings do not disclose consistently. Production-model
-work, richer UI, and deployment remain later milestones.
+for fields that annual filings do not disclose consistently. The Gemini
+structured-output adapter is now implemented behind the existing LLM port;
+richer UI and deployment remain later milestones.
 
 ## Delivery Principles
 

@@ -19,7 +19,7 @@ flowchart TB
 
         Agent --> Policy["Persona policy registry"]
         Agent --> Calculator["Deterministic calculations"]
-        Agent --> LLM["LLM adapter"]
+        Agent --> LLM["Gemini structured-output adapter<br/>or explicit offline fake"]
         Agent --> MCPClient["MCP client"]
 
         MCPClient -->|"MCP Streamable HTTP"| MCPServer["MCP data server"]

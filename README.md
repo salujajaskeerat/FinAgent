@@ -8,9 +8,9 @@ external consumers use the same FastAPI contract.
 
 This repository now contains an executable vertical slice: FastAPI calls the
 bounded analysis service, which reaches a separate MCP Streamable HTTP process
-and a read-only SQLite database. The integration suite proves that boundary
-with deterministic fixture data and a fake LLM. A production model adapter and
-curated market/benchmark records remain later milestones.
+and a read-only SQLite database. Gemini provides configurable planning and
+synthesis, while a deterministic fake provider keeps offline tests reproducible.
+Curated market and benchmark records remain a later milestone.
 
 ## Architecture
 
@@ -73,8 +73,21 @@ Python 3.11 or newer and [uv](https://docs.astral.sh/uv/) are recommended.
 uv sync --extra test
 ```
 
-Copy `.env.example` for reference, but export variables in the shell that starts
-each process. Never commit a real key or personal `.env` file.
+Create a local environment file and add your Gemini API key:
+
+```bash
+cp .env.example .env
+```
+
+```dotenv
+LLM_PROVIDER=gemini
+LLM_MODEL=gemini-2.5-flash-lite
+GEMINI_API_KEY=your-key-from-google-ai-studio
+```
+
+The API loads `.env` without overriding variables already exported by the
+process. Never commit the key or the local `.env` file; both `.env` and its
+variants are ignored by Git.
 
 ## Build the sector database
 
@@ -153,9 +166,24 @@ Defaults:
 - API: `http://127.0.0.1:8000`
 - Streamlit: `http://localhost:8501`
 
-The default API uses `FakeLlmGateway`, a deterministic source-linked adapter for
-tests and system demonstrations. It does not provide substantive investment
-analysis.
+With the copied `.env`, the API uses the
+[official Google Gen AI SDK](https://googleapis.github.io/python-genai/) and
+[Gemini 2.5 Flash-Lite](https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite).
+To run entirely offline, explicitly set `LLM_PROVIDER=fake`; that provider
+validates plumbing but does not provide substantive investment analysis.
+
+Gemini is not given MCP, Search, URL, or SQL tools. It proposes a typed retrieval
+plan, the application restricts that plan to catalog values and performs MCP
+queries, then Gemini analyzes only the retrieved evidence. The application
+validates every returned company and source identifier before responding.
+
+[Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing) currently
+lists a limited free tier for Gemini 2.5 Flash-Lite. Google states that free-tier
+prompts and responses may be used to improve its products, so this demo should
+receive only public, non-confidential information—never MNPI, private deal
+material, client data, or secrets. A publicly exposed deployment also needs
+authentication and request/rate limits; the supplied server binds to loopback
+by default.
 
 ## API
 
@@ -220,6 +248,15 @@ The current tests cover:
 - architectural import boundaries;
 - SEC identity, rate limiting, caching, and idempotent offline builds; and
 - the UI's HTTP-only client behavior.
+
+To make one opt-in Gemini planning and synthesis request using only public
+fixture evidence:
+
+```bash
+RUN_LIVE_GEMINI_TEST=1 uv run --env-file .env pytest -q -m live
+```
+
+The normal suite never reads a key or accesses Gemini.
 
 ## Data-quality caveats
 

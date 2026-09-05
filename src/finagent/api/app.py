@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable
 from uuid import UUID, uuid4
 
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -33,10 +34,13 @@ from finagent.core.errors import (
     RateLimitError,
 )
 from finagent.core.persona_policy import PersonaPolicyStore
-from finagent.gateways.llm import FakeLlmGateway
+from finagent.gateways.llm import build_llm_gateway
 from finagent.gateways.mcp_client import McpDataGateway, StreamableHttpToolCaller
 
 logger = logging.getLogger("finagent.api")
+
+# Local development reads an ignored .env file; deployed environment variables win.
+load_dotenv(override=False)
 
 
 def build_service() -> AnalysisService:
@@ -45,7 +49,7 @@ def build_service() -> AnalysisService:
     timeout = float(os.getenv("FINAGENT_ANALYSIS_TIMEOUT_SECONDS", "45"))
     return AnalysisService(
         data_gateway=McpDataGateway(StreamableHttpToolCaller(mcp_url)),
-        llm_gateway=FakeLlmGateway(),
+        llm_gateway=build_llm_gateway(),
         policies=PersonaPolicyStore.load(),
         deadline_seconds=timeout,
     )
