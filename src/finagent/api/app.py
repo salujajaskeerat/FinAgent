@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from uuid import UUID, uuid4
@@ -240,7 +241,18 @@ def _stream_problem(exc: FinagentError, request_id: UUID) -> dict[str, object]:
     }
 
 
-app = create_app()
+try:
+    app = create_app()
+except DependencyUnavailableError as exc:
+    # A misconfigured provider (usually a blank LLM_API_KEY) should read as one
+    # line, not a traceback -- the same fail-fast style as the MCP server's
+    # missing-database check.
+    print(
+        f"finagent-api: {exc}\n"
+        "Set it in .env, or use LLM_PROVIDER=fake to run offline without a key.",
+        file=sys.stderr,
+    )
+    raise SystemExit(2) from None
 
 
 def run() -> None:

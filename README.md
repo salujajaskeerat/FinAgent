@@ -31,9 +31,13 @@ database is committed, so nothing needs downloading.
 
 ```bash
 uv sync --extra test
-cp .env.example .env            # add one API key (see "LLM providers"), or set LLM_PROVIDER=fake
+cp .env.example .env            # put one API key in LLM_API_KEY (see "LLM providers")
 make demo                       # starts MCP (8001), API (8000), and Streamlit (8501)
 ```
+
+No key to hand? `LLM_PROVIDER=fake make demo` runs every path offline with a
+deterministic provider (exported variables win over `.env`). The API refuses to
+start with a blank key and says which variable to set.
 
 Or in three terminals: `uv run finagent-mcp`, `uv run finagent-api`,
 `uv run streamlit run ui/app.py`. Verify with `uv run pytest` (offline, no key).
@@ -50,6 +54,20 @@ curl -sS http://127.0.0.1:8000/v1/analyses \
 `LLM_PROVIDER=fake` runs with no key and no network: it returns the retrieved
 evidence tabulated under the persona's sections but makes no analytical
 judgement, and says so. Use a real provider to see persona reasoning.
+
+## Submission checklist
+
+| The brief asks for | Where it is |
+| --- | --- |
+| Persona-configurable agent, 3 personas × 3 sectors | `config/personas.yaml`, one `AnalysisService`; [Personas](#personas-same-data-different-reasoning) |
+| Sector data you sourced, in a real database, queried live | `data/finagent.db` (committed, SEC EDGAR), reached only through MCP; [Data](#data-sources-and-schema) |
+| DB access exposed as MCP tools and consumed over MCP | `mcp_server/` (4 typed read-only tools), `gateways/mcp_client.py`; [MCP design](#mcp-design) |
+| Streamlit UI and a JSON API on the same agent | `ui/app.py` is an HTTP client of `POST /v1/analyses`; [API](#api) |
+| `.env.example`, no real keys | [`.env.example`](.env.example) |
+| Sample DB or a rebuild script | DB is committed; `uv run python -m finagent.ingestion refresh-public` rebuilds it from SEC EDGAR (set `SEC_USER_AGENT`) |
+| Write-up: schema, MCP design, one thing to improve | [Write-up](#write-up) |
+| Video walkthrough | _link to be added_ |
+| Evidence it behaves as claimed | [`docs/EVAL.md`](docs/EVAL.md), `uv run pytest` |
 
 ## How an analysis runs
 
@@ -254,7 +272,7 @@ deadline exceeded → 504, all as RFC 7807 Problem Details with `X-Request-ID`.
 ## Verification
 
 ```bash
-uv run pytest                    # 113 tests, offline; includes a real MCP server subprocess
+uv run pytest                    # 122 tests, offline; includes a real MCP server subprocess
 uv run pytest -m integration     # only the real-transport tests
 make lint
 uv run python scripts/eval_matrix.py   # against a running API -> docs/EVAL.md (committed run: Gemini)
