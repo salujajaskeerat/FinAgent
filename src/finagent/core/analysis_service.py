@@ -31,6 +31,7 @@ from finagent.contracts.mcp import (
 )
 from finagent.core.derived import derive
 from finagent.core.errors import AnalysisTimeoutError
+from finagent.core.formatting import normalize_answer_markdown
 from finagent.core.grounding import grounding_issues
 from finagent.core.models import EvidenceBundle, RetrievalPlan
 from finagent.core.persona_policy import PersonaPolicy, PersonaPolicyStore
@@ -281,7 +282,9 @@ class AnalysisService:
             status=AnalysisStatus.ANSWERED,
             persona=request.persona,
             sector=request.sector,
-            answer_markdown=draft.answer_markdown,
+            answer_markdown=normalize_answer_markdown(
+                draft.answer_markdown, policy.required_sections
+            ),
             findings=draft.findings,
             derived_metrics=evidence.derived,
             companies=referenced_companies,

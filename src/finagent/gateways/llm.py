@@ -129,10 +129,15 @@ def synthesis_instruction(policy: PersonaPolicy) -> str:
         f"You must address:\n{address}\n\n"
         f"You must avoid:\n{avoid}\n\n"
         f"Decision output: {policy.decision_output}\n\n"
-        "Structure answer_markdown with exactly these H3 headings, in order:\n"
+        "Structure answer_markdown with exactly these H3 headings, in order, each "
+        "heading on its own line followed by a blank line:\n"
         f"{sections}\n\n"
-        "Length budget: answer_markdown under 450 words in total, at most 8 findings "
-        "of one sentence each. Cite the latest year and the change, not every year."
+        "Under each heading write 2-4 bullet points, one per line starting with "
+        "'- ', each one or two sentences with concrete figures and the year. End the "
+        "final section with a bold '**Decision:**' line giving the decision output. "
+        "Use Markdown line breaks (\\n) between every heading, bullet, and "
+        "paragraph. Length budget: under 450 words; at most 8 findings of one "
+        "sentence each."
     )
 
 
