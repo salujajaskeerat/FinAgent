@@ -84,17 +84,18 @@ class StubDataGateway:
         metric_keys: list[str],
         latest_only: bool,
     ) -> ObservationResult:
-        """Return one source-linked observation unless configured empty."""
-        del sector, metric_keys, latest_only
+        """Return one source-linked observation per known metric unless empty."""
+        del sector, latest_only
         if self._empty:
             return ObservationResult(dataset_version="fixture-v1")
+        known = [key for key in metric_keys if key in self.catalog_value.metric_keys]
         return ObservationResult(
             dataset_version="fixture-v1",
             observations=[
                 Observation(
-                    observation_id="obs_fixture",
+                    observation_id=f"obs_fixture_{key}",
                     entity_id=entity_ids[0],
-                    metric_key="revenue",
+                    metric_key=key,
                     value=1_200.0,
                     unit="USD",
                     currency="USD",
@@ -102,6 +103,7 @@ class StubDataGateway:
                     observed_at=date(2025, 2, 1),
                     source_id=self.source.source_id,
                 )
+                for key in known or ["revenue"]
             ],
             sources=[self.source],
         )

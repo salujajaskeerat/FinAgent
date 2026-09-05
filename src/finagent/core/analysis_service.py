@@ -12,6 +12,7 @@ from finagent.contracts.api import (
     AnalysisStatus,
     CatalogResponse,
     CompanyRef,
+    EvidenceCoverage,
     EvidenceStatus,
     PersonaOption,
     Sector,
@@ -28,7 +29,7 @@ from finagent.contracts.mcp import (
 from finagent.core.errors import AnalysisTimeoutError
 from finagent.core.grounding import grounding_issues
 from finagent.core.models import EvidenceBundle, RetrievalPlan
-from finagent.core.persona_policy import PersonaPolicyStore
+from finagent.core.persona_policy import PersonaPolicy, PersonaPolicyStore
 from finagent.core.ports import DataGateway, EntityResolver, LlmGateway
 from finagent.core.state import AnalysisState, StateTrace
 
@@ -148,7 +149,7 @@ class AnalysisService:
 
         trace.move(AnalysisState.PLANNING)
         proposed_plan = await self._llm.plan(request, policy, catalog, target_ids)
-        plan = self._constrain_plan(proposed_plan, catalog, target_ids)
+        plan = self._constrain_plan(proposed_plan, catalog, target_ids, policy)
 
         trace.move(AnalysisState.RETRIEVING)
         observations, events = await asyncio.gather(
@@ -206,7 +207,15 @@ class AnalysisService:
             for entity in company_entities
             if entity.entity_id in referenced_ids
         ]
+        coverage = self._coverage(policy, plan, observations, events)
         limitations = [*draft.limitations, *evidence.warnings]
+        if coverage.missing_metrics:
+            limitations.insert(
+                0,
+                "Required metrics not available in the dataset: "
+                + ", ".join(coverage.missing_metrics)
+                + ".",
+            )
         return AnalysisResponse(
             request_id=request_id,
             status=AnalysisStatus.ANSWERED,
@@ -217,10 +226,37 @@ class AnalysisService:
             companies=referenced_companies,
             sources=list(source_map.values()),
             evidence_status=(
-                EvidenceStatus.PARTIAL if limitations else EvidenceStatus.SUFFICIENT
+                EvidenceStatus.PARTIAL
+                if coverage.missing_metrics
+                else EvidenceStatus.SUFFICIENT
             ),
+            coverage=coverage,
             data_as_of=self._data_as_of(observations, events),
             limitations=limitations,
+        )
+
+    @staticmethod
+    def _coverage(
+        policy: PersonaPolicy,
+        plan: RetrievalPlan,
+        observations: ObservationResult,
+        events: EventResult,
+    ) -> EvidenceCoverage:
+        """Compare persona-required inputs with what MCP actually returned."""
+        seen_metrics = {item.metric_key for item in observations.observations}
+        seen_events = {item.event_kind for item in events.events}
+        return EvidenceCoverage(
+            required_metrics=list(policy.required_metrics),
+            available_metrics=[
+                key for key in policy.required_metrics if key in seen_metrics
+            ],
+            missing_metrics=[
+                key for key in policy.required_metrics if key not in seen_metrics
+            ],
+            requested_event_kinds=list(plan.event_kinds),
+            available_event_kinds=[
+                kind for kind in plan.event_kinds if kind in seen_events
+            ],
         )
 
     async def _fallback_entity_id(
@@ -305,7 +341,15 @@ class AnalysisService:
         plan: RetrievalPlan,
         catalog: DatasetCatalog,
         target_ids: list[str],
+        policy: PersonaPolicy,
     ) -> RetrievalPlan:
+        """Turn the model's proposal into the query the application will run.
+
+        The model's plan is only a seed. Every identifier is intersected with
+        the MCP catalog, and the persona policy's required and preferred inputs
+        are always added so persona retrieval is deterministic regardless of
+        what the model proposed.
+        """
         allowed_entities = {entity.entity_id for entity in catalog.entities}
         allowed_metrics = set(catalog.metric_keys)
         allowed_events = set(catalog.event_kinds)
@@ -316,10 +360,26 @@ class AnalysisService:
             selected_entities = [
                 item for item in target_ids if item in allowed_entities
             ]
+        if policy.include_benchmark:
+            selected_entities.extend(
+                entity.entity_id
+                for entity in catalog.entities
+                if entity.kind is EntityKind.BENCHMARK
+            )
+        metric_keys = [
+            *plan.metric_keys,
+            *policy.required_metrics,
+            *policy.preferred_metrics,
+        ]
+        event_kinds = [*plan.event_kinds, *policy.event_kinds]
         return RetrievalPlan(
-            entity_ids=selected_entities,
-            metric_keys=[item for item in plan.metric_keys if item in allowed_metrics],
-            event_kinds=[item for item in plan.event_kinds if item in allowed_events],
+            entity_ids=list(dict.fromkeys(selected_entities)),
+            metric_keys=[
+                item for item in dict.fromkeys(metric_keys) if item in allowed_metrics
+            ],
+            event_kinds=[
+                item for item in dict.fromkeys(event_kinds) if item in allowed_events
+            ],
             latest_only=plan.latest_only,
         )
 

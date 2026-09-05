@@ -83,6 +83,21 @@ class Finding(StrictModel):
     source_ids: list[str] = Field(min_length=1)
 
 
+class EvidenceCoverage(StrictModel):
+    """Which persona-required inputs the retrieved evidence actually contained.
+
+    ``evidence_status`` is derived from ``missing_metrics``: an answer is
+    ``sufficient`` only when every required metric returned at least one
+    observation. This is the machine-readable substitute for a confidence score.
+    """
+
+    required_metrics: list[str] = Field(default_factory=list)
+    available_metrics: list[str] = Field(default_factory=list)
+    missing_metrics: list[str] = Field(default_factory=list)
+    requested_event_kinds: list[str] = Field(default_factory=list)
+    available_event_kinds: list[str] = Field(default_factory=list)
+
+
 class AnalysisResponse(StrictModel):
     """Structured, source-aware analysis response."""
 
@@ -96,6 +111,7 @@ class AnalysisResponse(StrictModel):
     companies: list[CompanyRef] = Field(default_factory=list)
     sources: list[SourceRef] = Field(default_factory=list)
     evidence_status: EvidenceStatus
+    coverage: EvidenceCoverage | None = None
     data_as_of: date | None = None
     limitations: list[str] = Field(default_factory=list)
 

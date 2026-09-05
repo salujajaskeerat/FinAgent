@@ -1,3 +1,7 @@
+# Declarative persona policies. `required_metrics` decide evidence status:
+# an answer is `sufficient` only when every required metric was retrieved.
+# `preferred_metrics` are requested when the catalog offers them; gaps are
+# reported as limitations without downgrading the status.
 mutual_fund_analyst:
   label: Mutual Fund Analyst
   description: Long-only, benchmark-relative analysis focused on durable growth and portfolio fit.
@@ -6,7 +10,9 @@ mutual_fund_analyst:
     - revenue
     - operating_margin
     - free_cash_flow
+  preferred_metrics:
     - market_cap
+  include_benchmark: true
   event_kinds:
     - guidance
     - headcount
@@ -22,7 +28,9 @@ equity_analyst:
     - revenue
     - operating_income
     - operating_margin
+  preferred_metrics:
     - enterprise_value
+    - share_price
   event_kinds:
     - guidance
     - headcount
@@ -35,11 +43,12 @@ pe_analyst:
   description: Deal and operations analysis focused on cash flow, leverage, value creation, and exit.
   horizon: 3-5 years
   required_metrics:
-    - enterprise_value
     - free_cash_flow
     - total_debt
     - cash_and_equivalents
     - capital_expenditure
+  preferred_metrics:
+    - enterprise_value
   event_kinds:
     - guidance
     - headcount

@@ -76,7 +76,10 @@ def test_api_uses_real_mcp_for_latest_headcount(real_mcp_url: str) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "answered"
-    assert body["evidence_status"] == "partial"
+    # The fixture's quality caveat is surfaced as a limitation; every metric the
+    # equity persona requires was retrieved, so evidence coverage is complete.
+    assert body["evidence_status"] == "sufficient"
+    assert body["coverage"]["missing_metrics"] == []
     assert body["data_as_of"] == "2025-02-15"
     assert any("950 employees" in item["text"] for item in body["findings"])
     assert body["sources"][0]["published_at"] == "2025-02-15"

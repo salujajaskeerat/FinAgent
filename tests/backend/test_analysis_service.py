@@ -228,8 +228,87 @@ def test_model_plan_is_allowlisted_before_any_mcp_query() -> None:
     )
 
     assert result.status is AnalysisStatus.ANSWERED
-    assert data.observation_query == (["cmp_example"], ["revenue"])
-    assert data.event_query == (["cmp_example"], ["headcount"])
+    assert data.observation_query is not None
+    assert data.event_query is not None
+    entity_ids, metric_keys = data.observation_query
+    assert entity_ids == ["cmp_example"]
+    assert "model_generated_sql" not in metric_keys
+    assert "google_search" not in data.event_query[1]
+    # The model's proposal seeds the plan; the persona policy completes it.
+    assert metric_keys[0] == "revenue"
+    assert {"operating_income", "operating_margin", "enterprise_value"} <= set(
+        metric_keys
+    )
+    assert data.event_query == (["cmp_example"], ["headcount", "guidance"])
+
+
+def test_required_metrics_are_retrieved_even_if_model_omits_them() -> None:
+    """PE retrieval must include leverage inputs regardless of the model's plan."""
+    data = _RecordingDataGateway()
+    service = AnalysisService(data, _UntrustedPlanner(), PersonaPolicyStore.load())
+
+    result = asyncio.run(
+        service.analyze(
+            AnalysisRequest(query="Analyze revenue.", persona=Persona.PE, sector=Sector.TECH)
+        )
+    )
+
+    assert result.status is AnalysisStatus.ANSWERED
+    assert data.observation_query is not None
+    assert {"free_cash_flow", "total_debt", "cash_and_equivalents"} <= set(
+        data.observation_query[1]
+    )
+    assert "restructuring" in data.event_query[1]
+
+
+def test_mutual_fund_plan_always_includes_the_sector_benchmark() -> None:
+    data = _RecordingDataGateway()
+    service = AnalysisService(data, _UntrustedPlanner(), PersonaPolicyStore.load())
+
+    asyncio.run(
+        service.analyze(
+            AnalysisRequest(
+                query="Analyze revenue.", persona=Persona.MUTUAL_FUND, sector=Sector.TECH
+            )
+        )
+    )
+
+    assert data.observation_query is not None
+    assert data.observation_query[0] == ["cmp_example", "benchmark:tech"]
+
+
+def test_evidence_status_reflects_required_metric_coverage() -> None:
+    """Caveats become limitations; only missing required metrics downgrade status."""
+
+    class _RevenueOnlyGateway(StubDataGateway):
+        async def query_observations(
+            self,
+            sector: Sector,
+            entity_ids: list[str],
+            metric_keys: list[str],
+            latest_only: bool,
+        ) -> ObservationResult:
+            result = await super().query_observations(
+                sector, entity_ids, ["revenue"], latest_only
+            )
+            result.warnings.append("fixture caveat: verify before investment use")
+            return result
+
+    request = AnalysisRequest(
+        query="How do the fundamentals look?",
+        persona=Persona.EQUITY,
+        sector=Sector.TECH,
+    )
+    partial = asyncio.run(_service(_RevenueOnlyGateway()).analyze(request))
+    complete = asyncio.run(_service(StubDataGateway()).analyze(request))
+
+    assert partial.evidence_status is EvidenceStatus.PARTIAL
+    assert partial.coverage is not None
+    assert partial.coverage.missing_metrics == ["operating_income", "operating_margin"]
+    assert partial.limitations[0].startswith("Required metrics not available")
+    assert complete.evidence_status is EvidenceStatus.SUFFICIENT
+    assert complete.coverage is not None
+    assert complete.coverage.missing_metrics == []
 
 
 def test_semantic_fallback_selects_one_catalog_company() -> None:
