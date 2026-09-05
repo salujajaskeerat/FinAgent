@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import date
 from uuid import UUID, uuid4
 
@@ -35,6 +36,8 @@ from finagent.core.models import EvidenceBundle, RetrievalPlan
 from finagent.core.persona_policy import PersonaPolicy, PersonaPolicyStore
 from finagent.core.ports import DataGateway, EntityResolver, LlmGateway
 from finagent.core.state import AnalysisState, StateTrace
+
+ProgressCallback = Callable[[AnalysisState, str], Awaitable[None]]
 
 
 class AnalysisService:
@@ -88,6 +91,7 @@ class AnalysisService:
         self,
         request: AnalysisRequest,
         request_id: UUID | None = None,
+        on_progress: ProgressCallback | None = None,
     ) -> AnalysisResponse:
         """Execute one analysis within a global deadline.
 
@@ -97,6 +101,9 @@ class AnalysisService:
             Validated public request.
         request_id
             Correlation identifier supplied by the HTTP adapter.
+        on_progress
+            Optional coroutine called on every state transition with the state
+            just entered and a one-line summary of what the previous step did.
 
         Returns
         -------
@@ -111,17 +118,25 @@ class AnalysisService:
         run_id = request_id or uuid4()
         try:
             async with asyncio.timeout(self._deadline_seconds):
-                return await self._analyze(request, run_id)
+                return await self._analyze(request, run_id, on_progress)
         except TimeoutError as exc:
             raise AnalysisTimeoutError("analysis deadline exceeded") from exc
 
     async def _analyze(
-        self, request: AnalysisRequest, request_id: UUID
+        self,
+        request: AnalysisRequest,
+        request_id: UUID,
+        on_progress: ProgressCallback | None,
     ) -> AnalysisResponse:
         trace = StateTrace()
         policy = self._policies.get(request.persona)
 
-        trace.move(AnalysisState.RESOLVING_SCOPE)
+        async def step(state: AnalysisState, message: str = "") -> None:
+            trace.move(state)
+            if on_progress is not None:
+                await on_progress(state, message)
+
+        await step(AnalysisState.RESOLVING_SCOPE)
         catalog, resolution = await asyncio.gather(
             self._data.get_catalog(request.sector),
             self._data.resolve_companies(request.sector, request.query),
@@ -139,7 +154,10 @@ class AnalysisService:
             if fallback_id is not None:
                 target_ids = [fallback_id]
             else:
-                trace.move(AnalysisState.COMPLETED)
+                await step(
+                    AnalysisState.COMPLETED,
+                    f"No catalog match for '{resolution.unresolved_mentions[0]}'",
+                )
                 return self._out_of_scope(
                     request, request_id, company_entities, self._trace(trace, catalog)
                 )
@@ -147,7 +165,7 @@ class AnalysisService:
         if not target_ids:
             target_ids = [entity.entity_id for entity in company_entities]
         if not target_ids:
-            trace.move(AnalysisState.COMPLETED)
+            await step(AnalysisState.COMPLETED, "No companies loaded")
             return self._insufficient(
                 request,
                 request_id,
@@ -155,18 +173,25 @@ class AnalysisService:
                 self._trace(trace, catalog),
             )
 
-        trace.move(AnalysisState.PLANNING)
+        await step(
+            AnalysisState.PLANNING,
+            f"Resolved {len(target_ids)} of {len(company_entities)} companies",
+        )
         proposed_plan = await self._llm.plan(request, policy, catalog, target_ids)
         plan = self._constrain_plan(proposed_plan, catalog, target_ids, policy)
         llm_calls = 1
 
-        trace.move(AnalysisState.RETRIEVING)
+        await step(
+            AnalysisState.RETRIEVING,
+            f"Model proposed {len(proposed_plan.metric_keys)} metrics; running "
+            f"{len(plan.metric_keys)} metrics and {len(plan.event_kinds)} event kinds",
+        )
         observations, events = await asyncio.gather(
             self._get_observations(request, plan),
             self._get_events(request, plan),
         )
         if not observations.observations and not events.events:
-            trace.move(AnalysisState.COMPLETED)
+            await step(AnalysisState.COMPLETED, "No observations returned")
             return self._insufficient(
                 request,
                 request_id,
@@ -187,25 +212,32 @@ class AnalysisService:
         )
 
         # Deterministic arithmetic happens here, never inside the model.
-        trace.move(AnalysisState.CALCULATING)
+        await step(
+            AnalysisState.CALCULATING,
+            f"Retrieved {len(observations.observations)} observations and "
+            f"{len(events.events)} signals from {len(source_map)} sources",
+        )
         evidence.derived = derive(evidence, policy)
 
-        trace.move(AnalysisState.SYNTHESIZING)
+        await step(
+            AnalysisState.SYNTHESIZING,
+            f"Computed {len(evidence.derived)} derived metrics",
+        )
         draft = await self._llm.synthesize(request, policy, evidence)
         llm_calls += 1
-        trace.move(AnalysisState.VALIDATING)
+        await step(AnalysisState.VALIDATING, f"Drafted {len(draft.findings)} findings")
         allowed_companies = {entity.entity_id for entity in company_entities}
         issues = grounding_issues(draft, allowed_companies, evidence.source_ids)
         repaired = False
         if issues:
-            trace.move(AnalysisState.REPAIRING)
+            await step(AnalysisState.REPAIRING, f"{len(issues)} grounding issue(s)")
             draft = await self._llm.repair(request, policy, evidence, draft, issues)
             llm_calls += 1
             repaired = True
-            trace.move(AnalysisState.VALIDATING)
+            await step(AnalysisState.VALIDATING, "Repaired draft")
             issues = grounding_issues(draft, allowed_companies, evidence.source_ids)
         if issues:
-            trace.move(AnalysisState.COMPLETED)
+            await step(AnalysisState.COMPLETED, "Findings still ungrounded")
             return self._insufficient(
                 request,
                 request_id,
@@ -213,7 +245,10 @@ class AnalysisService:
                 self._trace(trace, catalog, proposed_plan, plan, repaired, llm_calls),
             )
 
-        trace.move(AnalysisState.COMPLETED)
+        await step(
+            AnalysisState.COMPLETED,
+            f"All {len(draft.findings)} findings grounded in {len(source_map)} sources",
+        )
         referenced_ids = {
             company_id
             for finding in draft.findings

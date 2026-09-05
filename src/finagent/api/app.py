@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from uuid import UUID, uuid4
 
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from finagent.api.errors import (
     dependency_exception_handler,
@@ -31,9 +32,11 @@ from finagent.core.analysis_service import AnalysisService
 from finagent.core.errors import (
     AnalysisTimeoutError,
     DependencyUnavailableError,
+    FinagentError,
     RateLimitError,
 )
 from finagent.core.persona_policy import PersonaPolicyStore
+from finagent.core.state import AnalysisState
 from finagent.gateways.entity_resolver import build_entity_resolver
 from finagent.gateways.llm import build_llm_gateway
 from finagent.gateways.mcp_client import McpDataGateway, StreamableHttpToolCaller
@@ -128,6 +131,68 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
         request_id: UUID = request.state.request_id
         return await analysis_service.analyze(payload, request_id=request_id)
 
+    @app.post("/v1/analyses/stream")
+    async def stream_analysis(
+        payload: AnalysisRequest,
+        request: Request,
+        analysis_service: AnalysisService = Depends(get_service),
+    ) -> StreamingResponse:
+        """Run the same analysis, streaming one `step` event per state transition.
+
+        The stream ends with a `result` event carrying the identical
+        AnalysisResponse that POST /v1/analyses returns, or an `error` event
+        with a Problem Details body.
+        """
+        request_id: UUID = request.state.request_id
+        queue: asyncio.Queue[tuple[str, dict[str, object]] | None] = asyncio.Queue()
+        started = time.perf_counter()
+
+        async def on_progress(state: AnalysisState, message: str) -> None:
+            await queue.put(
+                (
+                    "step",
+                    {
+                        "state": state.value,
+                        "message": message,
+                        "elapsed_ms": round((time.perf_counter() - started) * 1_000),
+                    },
+                )
+            )
+
+        async def run() -> None:
+            try:
+                result = await analysis_service.analyze(
+                    payload, request_id=request_id, on_progress=on_progress
+                )
+                await queue.put(("result", result.model_dump(mode="json")))
+            except FinagentError as exc:
+                await queue.put(("error", _stream_problem(exc, request_id)))
+            except Exception:  # keep the stream well-formed on unexpected failures
+                logger.exception("streaming analysis failed")
+                await queue.put(
+                    (
+                        "error",
+                        _stream_problem(FinagentError("internal error"), request_id),
+                    )
+                )
+            finally:
+                await queue.put(None)
+
+        async def events() -> AsyncIterator[str]:
+            task = asyncio.create_task(run())
+            try:
+                while (item := await queue.get()) is not None:
+                    name, data = item
+                    yield f"event: {name}\ndata: {json.dumps(data)}\n\n"
+            finally:
+                task.cancel()
+
+        return StreamingResponse(
+            events(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     @app.get("/v1/catalog", response_model=CatalogResponse)
     async def get_catalog(
         sector: Sector,
@@ -153,6 +218,26 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
         return JSONResponse(status_code=200, content={"status": "ready"})
 
     return app
+
+
+_STREAM_STATUS = {
+    "DEPENDENCY_UNAVAILABLE": 503,
+    "ANALYSIS_TIMEOUT": 504,
+    "RATE_LIMITED": 429,
+}
+
+
+def _stream_problem(exc: FinagentError, request_id: UUID) -> dict[str, object]:
+    """Problem Details payload for an `error` stream event."""
+    status = _STREAM_STATUS.get(exc.code, 500)
+    return {
+        "type": f"https://finagent.local/problems/{exc.code.lower().replace('_', '-')}",
+        "title": exc.__class__.__doc__ or exc.code,
+        "status": status,
+        "detail": str(exc),
+        "code": exc.code,
+        "request_id": str(request_id),
+    }
 
 
 app = create_app()
