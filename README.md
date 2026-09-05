@@ -167,10 +167,33 @@ canonical IDs (never free text into SQL), every query is parameterized and
 sector-scoped, unknown or cross-sector IDs are rejected, and the connection is
 opened `mode=ro` with `query_only` on.
 
-The LLM is **not** an MCP client. It receives no tools of any kind; it proposes
-a plan as JSON, the application runs the MCP calls, and the model reasons only
-over what came back. This keeps every data access deterministic, testable, and
-free of prompt-injection paths from data into queries.
+### Why the model is not the MCP client
+
+The obvious design is an LLM in a tool-calling loop with the four MCP tools.
+This project deliberately does not do that. The *agent* — the `AnalysisService`
+workflow — is the MCP client; the model is a constrained reasoning step inside
+it. It receives no tools of any kind: it proposes a retrieval plan as JSON, the
+application intersects that plan with the catalog and adds the persona's
+required inputs, runs the MCP calls itself, computes the arithmetic, and only
+then asks the model to reason over the returned evidence.
+
+What this buys, and why it matters for a financial-research tool:
+
+- **Auditability.** Every response's `trace` shows the plan the model proposed
+  and the plan that actually ran. A tool-calling loop's choices are buried in a
+  transcript; here they are a field in the API contract.
+- **Determinism per persona.** A PE answer always retrieves debt and cash data
+  because the policy says so, not because the model remembered to ask.
+- **No injection path from data to queries.** Dataset strings never become
+  tool arguments chosen by the model; the catalog is a closed allowlist.
+- **Bounded cost and latency.** Exactly two model calls on the happy path, three
+  with a repair, and a 0-call exit for out-of-scope questions.
+
+The trade-off is generality: the workflow answers one shape of question well and
+will not improvise new retrieval strategies. For an analyst tool over a curated
+dataset, that is the right side of the trade. Switching to a tool-calling loop
+would be a change to `gateways/llm.py` alone — the MCP boundary, contracts, and
+grounding validation would stay exactly as they are.
 
 ## LLM providers
 
