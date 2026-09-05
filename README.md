@@ -91,6 +91,11 @@ uv run python -m finagent.ingestion download
 # This step is offline and builds SQLite atomically from the cache.
 uv run python -m finagent.ingestion build --output data/finagent.db
 
+# Build a separate database from the real SEC cache.
+uv run python -m finagent.ingestion build \
+  --raw-dir data/raw/sec \
+  --output data/finagent_sec.db
+
 # Or build a complete illustrative local database immediately (offline).
 uv run python -m finagent.ingestion sample --output data/finagent.db
 ```
@@ -110,6 +115,12 @@ three-sector manifest, including annual financials, market snapshots, benchmark
 metrics, and headcount/guidance/restructuring signals. Its sources are explicit
 fixture placeholders and every row is labelled as illustrative; use the SEC
 pipeline for research-grade data.
+
+The SEC-backed build is currently annual-financials only: the fetched Companyfacts
+responses produced 36 annual snapshots across the 12 companies. Market prices,
+benchmarks, and compatible headcount/IR signals are not inferred from missing
+fields; those remain empty until their dedicated public-source adapters are
+added, so analyses correctly report partial or insufficient evidence.
 
 ## Run the services
 
