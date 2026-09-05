@@ -1,9 +1,17 @@
-"""Single-page Streamlit client for grounded financial analyses."""
+"""Single-page Streamlit client for grounded financial analyses.
+
+The page is a thin HTTP client. It streams the backend's workflow states into a
+step timeline so the agent's progress is visible, then renders the structured
+response. Colour is reserved for evidence status; personas are identified by
+icon only.
+"""
 
 from __future__ import annotations
 
 import os
-from concurrent.futures import ThreadPoolExecutor
+import queue
+import threading
+from dataclasses import dataclass, field
 
 import streamlit as st
 
@@ -12,19 +20,57 @@ from ui.api_client import (
     ApiClientError,
     Catalog,
     FinAgentApiClient,
+    StepEvent,
 )
 
 DEFAULT_SECTOR = "tech"
+PERSONA_ICONS = {
+    "mutual_fund_analyst": ":material/account_balance:",
+    "equity_analyst": ":material/query_stats:",
+    "pe_analyst": ":material/handshake:",
+}
 # The assignment's own sample questions, so reviewers can run them in one click.
-EXAMPLE_QUESTIONS = (
-    "Is this sector a good place to be putting money to work right now?",
-    "Which of these companies would fit a long-term core holding versus a name I should avoid?",
-    "Walk me through the margin profile of the companies in your data - who's improving and who's under pressure?",
-    "If I had to pick one company here to take private, which would it be and what's the operational thesis?",
-    "Which companies in this sector look like attractive buyout targets based on the data you have?",
-    "What's the most recent headcount or hiring signal you have for Apple?",
-    "What do you think about Tesla?",
-)
+PRESETS = {
+    ":material/trending_up: Sector outlook": (
+        "Is this sector a good place to be putting money to work right now?"
+    ),
+    ":material/inventory: Core holding vs avoid": (
+        "Which of these companies would fit a long-term core holding versus a "
+        "name I should avoid?"
+    ),
+    ":material/percent: Margin profile": (
+        "Walk me through the margin profile of the companies in your data - "
+        "who's improving and who's under pressure?"
+    ),
+    ":material/lock: Take-private pick": (
+        "If I had to pick one company here to take private, which would it be "
+        "and what's the operational thesis?"
+    ),
+    ":material/groups: Headcount signal": (
+        "What's the most recent headcount or hiring signal you have for Apple?"
+    ),
+    ":material/block: Out-of-scope company": "What do you think about Tesla?",
+}
+# Workflow states in order, with the labels shown while running and when done.
+STEPS: dict[str, tuple[str, str]] = {
+    "resolving_scope": ("Resolving scope", "Resolved scope"),
+    "planning": ("Planning retrieval", "Planned retrieval"),
+    "retrieving": ("Retrieving evidence over MCP", "Retrieved evidence"),
+    "calculating": ("Computing derived metrics", "Computed derived metrics"),
+    "synthesizing": ("Drafting the persona's answer", "Drafted answer"),
+    "validating": ("Validating grounding", "Validated grounding"),
+    "repairing": ("Repairing ungrounded findings", "Repaired findings"),
+}
+MAIN_STEPS = [state for state in STEPS if state != "repairing"]
+EVIDENCE_BADGE = {
+    "sufficient": ":green-badge[:material/verified: Evidence sufficient]",
+    "partial": ":orange-badge[:material/warning: Evidence partial]",
+    "none": ":red-badge[:material/help: No evidence]",
+}
+STATUS_BADGE = {
+    "out_of_scope": ":red-badge[:material/block: Out of scope]",
+    "insufficient_data": ":red-badge[:material/help: Insufficient data]",
+}
 
 
 def _client() -> FinAgentApiClient:
@@ -39,22 +85,9 @@ def _load_catalog(client: FinAgentApiClient, sector: str) -> Catalog | None:
     try:
         return client.get_catalog(sector)
     except ApiClientError as error:
-        st.error("The dataset catalog could not be loaded.")
-        st.caption(str(error))
-        if error.request_id:
-            st.caption(f"Request ID: `{error.request_id}`")
+        st.error("Can't reach the analysis service.", icon=":material/cloud_off:")
+        st.caption(f"{error} — start `finagent-mcp` and `finagent-api`, then refresh.")
         return None
-
-
-def _render_catalog_summary(catalog: Catalog) -> None:
-    """Render compact dataset coverage metadata."""
-    coverage = "Unknown"
-    if catalog.coverage_start or catalog.coverage_end:
-        coverage = f"{catalog.coverage_start or '—'} to {catalog.coverage_end or '—'}"
-    with st.container(horizontal=True):
-        st.metric("Companies", len(catalog.companies))
-        st.metric("Dataset version", catalog.dataset_version)
-        st.metric("Coverage", coverage)
 
 
 def _format_metric(value: float, unit: str) -> str:
@@ -73,44 +106,51 @@ def _format_metric(value: float, unit: str) -> str:
 
 def _render_analysis(analysis: Analysis, catalog: Catalog, *, compact: bool) -> None:
     """Render the answer and its provenance without hiding limitations."""
-    persona_labels = {item.value: item.label for item in catalog.personas}
-    sector_labels = {item.value: item.label for item in catalog.sectors}
-    company_names = {
-        item.company_id: item.ticker or item.name for item in catalog.companies
-    }
-    status_colour = {"sufficient": "green", "partial": "orange", "none": "red"}
-    colour = status_colour.get(analysis.evidence_status, "gray")
-    st.markdown(
-        f"**{persona_labels.get(analysis.persona, analysis.persona)}** · "
-        f"{sector_labels.get(analysis.sector, analysis.sector)} · "
-        f":{colour}-badge[Evidence {analysis.evidence_status}] · "
-        f"Data as of {analysis.data_as_of or 'n/a'}"
+    tickers = {item.company_id: item.ticker or item.name for item in catalog.companies}
+    badge = STATUS_BADGE.get(analysis.status) or EVIDENCE_BADGE.get(
+        analysis.evidence_status, ""
     )
-    if analysis.coverage and analysis.coverage.missing_metrics:
-        st.caption(
-            "Missing required inputs: " + ", ".join(analysis.coverage.missing_metrics)
-        )
+    st.markdown(f"{badge} :gray[Data as of {analysis.data_as_of or 'n/a'}]")
+    coverage = analysis.coverage
+    if coverage and coverage.missing_metrics:
+        marks = [
+            f":green[:material/check:] {key}"
+            if key not in coverage.missing_metrics
+            else f":red[:material/close:] {key}"
+            for key in coverage.required_metrics
+        ]
+        st.caption("Required inputs: " + " · ".join(marks))
 
-    if analysis.status in {"out_of_scope", "insufficient_data"}:
-        st.warning(analysis.answer_markdown)
+    if analysis.status in STATUS_BADGE:
+        st.warning(analysis.answer_markdown, icon=":material/block:")
+        if analysis.trace and analysis.trace.llm_calls == 0:
+            st.caption(
+                "Stopped after scope resolution. No planning or synthesis call was "
+                "made, so nothing could be fabricated."
+            )
     else:
         st.markdown(analysis.answer_markdown)
 
-    if analysis.companies:
-        labels = [
-            f"{company.name} ({company.ticker})" if company.ticker else company.name
-            for company in analysis.companies
-        ]
-        st.caption("Companies referenced: " + ", ".join(labels))
+    if analysis.findings:
+        with st.expander(
+            f":material/fact_check: Findings ({len(analysis.findings)}, all source-backed)",
+            expanded=not compact,
+        ):
+            for finding in analysis.findings:
+                companies = " ".join(
+                    f":blue[{tickers.get(cid, cid)}]" for cid in finding.company_ids
+                )
+                sources = " ".join(f":gray-badge[{sid}]" for sid in finding.source_ids)
+                st.markdown(f"- {finding.text} {companies} {sources}")
 
     if analysis.derived_metrics:
         with st.expander(
-            "Derived metrics (computed by the application, not the model)",
-            expanded=not compact,
+            f":material/calculate: Derived metrics ({len(analysis.derived_metrics)}) "
+            "— computed in code, not by the model"
         ):
             rows = [
                 {
-                    "Company": company_names.get(item.entity_id, item.entity_id),
+                    "Company": tickers.get(item.entity_id, item.entity_id),
                     "Metric": item.key,
                     "Value": _format_metric(item.value, item.unit),
                     "Period": item.period_end,
@@ -119,181 +159,307 @@ def _render_analysis(analysis: Analysis, catalog: Catalog, *, compact: bool) -> 
                 for item in analysis.derived_metrics
             ]
             st.dataframe(rows, hide_index=True, width="stretch")
-            caveats = sorted(
-                {item.caveat for item in analysis.derived_metrics if item.caveat}
-            )
-            for caveat in caveats:
+            for caveat in sorted(
+                {m.caveat for m in analysis.derived_metrics if m.caveat}
+            ):
                 st.caption(caveat)
 
-    if analysis.findings:
-        with st.expander("Evidence-backed findings", expanded=not compact):
-            for finding in analysis.findings:
-                st.markdown(f"- {finding.text}")
-                st.caption("Sources: " + ", ".join(finding.source_ids))
-
-    with st.expander("Sources", expanded=False):
-        if not analysis.sources:
-            st.caption("No supporting sources were returned.")
-        for source in analysis.sources:
-            st.markdown(f"[{source.title}]({source.url})")
-            dates = []
-            if source.published_at:
-                dates.append(f"published {source.published_at}")
-            if source.retrieved_at:
-                dates.append(f"retrieved {source.retrieved_at}")
-            suffix = f" · {' · '.join(dates)}" if dates else ""
-            st.caption(f"{source.publisher} · `{source.source_id}`{suffix}")
+    if analysis.sources:
+        with st.expander(f":material/link: Sources ({len(analysis.sources)})"):
+            for index, source in enumerate(analysis.sources, start=1):
+                dates = " · ".join(
+                    text
+                    for text in (
+                        f"published {source.published_at}"
+                        if source.published_at
+                        else "",
+                        f"retrieved {source.retrieved_at}"
+                        if source.retrieved_at
+                        else "",
+                    )
+                    if text
+                )
+                st.markdown(
+                    f"{index}. [{source.title}]({source.url})  \n"
+                    f":gray[{source.publisher} · `{source.source_id}`"
+                    f"{' · ' + dates if dates else ''}]"
+                )
 
     if analysis.limitations:
         with st.expander(
-            "Limitations",
+            f":material/report: Limitations ({len(analysis.limitations)})",
             expanded=analysis.evidence_status != "sufficient" and not compact,
         ):
             for limitation in analysis.limitations:
                 st.markdown(f"- {limitation}")
+    st.caption(f"request id `{analysis.request_id}`")
 
-    with st.expander("How this answer was produced"):
-        if analysis.trace:
-            st.markdown(" → ".join(analysis.trace.states))
-            st.caption(
-                f"LLM calls: {analysis.trace.llm_calls} · "
-                f"grounding repair: {'yes' if analysis.trace.repaired else 'no'}"
-            )
-            if (
-                analysis.trace.proposed_metric_keys
-                or analysis.trace.constrained_metric_keys
-            ):
-                st.markdown(
-                    "**Model proposed:** "
-                    + (", ".join(analysis.trace.proposed_metric_keys) or "—")
-                    + "  \n**Application ran:** "
-                    + (", ".join(analysis.trace.constrained_metric_keys) or "—")
+
+@dataclass
+class Panel:
+    """One persona's result card: a live step timeline above the answer."""
+
+    persona: str
+    label: str
+    catalog: Catalog
+    compact: bool
+    status: object = None
+    progress: object = None
+    body: object = None
+    current: object = None
+    current_note: object = None
+    planning: object = None
+    seen: list[str] = field(default_factory=list)
+    elapsed_ms: int = 0
+
+    def mount(self) -> None:
+        st.markdown(f"**{PERSONA_ICONS.get(self.persona, '')} {self.label}**")
+        self.status = st.status(":shimmer[Analyzing]", type="compact", expanded=True)
+        with self.status:
+            self.progress = st.empty()
+        self.body = st.empty()
+        self.body.skeleton(height=180)
+
+    def on_step(self, event: StepEvent) -> None:
+        self.elapsed_ms = event.elapsed_ms
+        with self.status:
+            if self.current is not None:
+                if event.message:
+                    self.current_note.caption(event.message)
+                self.current.update(label=STEPS[self.seen[-1]][1], state="complete")
+            if event.state in STEPS:
+                self.current = st.status(
+                    f":shimmer[{STEPS[event.state][0]}]", type="step"
                 )
-        st.code(analysis.request_id, language=None)
+                with self.current:
+                    # A step needs content to stay on the timeline; the summary
+                    # of this step is written here when the next one begins.
+                    self.current_note = st.empty()
+                    self.current_note.caption(":gray[working…]")
+                if event.state == "planning":
+                    self.planning = self.current
+                self.seen.append(event.state)
+                done = sum(state in self.seen for state in MAIN_STEPS)
+                remaining = [
+                    STEPS[state][0].split(" ")[0].lower()
+                    for state in MAIN_STEPS
+                    if state not in self.seen
+                ]
+                self.progress.progress(
+                    done / len(MAIN_STEPS),
+                    text=f"Step {done} of {len(MAIN_STEPS)} · {STEPS[event.state][0]}"
+                    + (f" · next: {', '.join(remaining)}" if remaining else ""),
+                )
+            elif event.state == "completed":
+                self.current = None
+                self.progress.empty()
+
+    def on_result(self, analysis: Analysis) -> None:
+        elapsed = self.elapsed_ms / 1_000
+        trace = analysis.trace
+        if self.planning is not None and trace is not None:
+            self.planning.markdown(
+                f"**Model proposed:** {', '.join(trace.proposed_metric_keys) or '—'}  \n"
+                f"**Application ran:** {', '.join(trace.constrained_metric_keys) or '—'}"
+            )
+        if trace is not None and trace.llm_calls == 0:
+            label = f"Stopped after scope check · 0 LLM calls · {elapsed:.1f} s"
+        else:
+            calls = trace.llm_calls if trace else "?"
+            repaired = "1 repair" if trace and trace.repaired else "no repair"
+            label = (
+                f"Completed in {elapsed:.1f} s · {len(self.seen)} steps · "
+                f"{calls} LLM calls · {repaired}"
+            )
+        self.status.update(label=label, state="complete", expanded=False)
+        with self.body.container():
+            _render_analysis(analysis, self.catalog, compact=self.compact)
+
+    def on_error(self, error: ApiClientError) -> None:
+        with self.status:
+            if self.current is not None:
+                self.current.update(state="error")
+        where = STEPS[self.seen[-1]][0].lower() if self.seen else "starting"
+        self.status.update(label=f"Failed while {where}", state="error", expanded=True)
+        with self.body.container():
+            st.error("The analysis didn't complete.", icon=":material/error:")
+            st.write(str(error))
+            if error.retryable:
+                st.caption("Usually temporary; run it again.")
+            if error.request_id:
+                st.caption(f"request id `{error.request_id}`")
 
 
-def _run_analyses(
-    client: FinAgentApiClient, question: str, personas: list[str], sector: str
-) -> dict[str, Analysis | ApiClientError]:
-    """Run one request per persona concurrently; the API is the only dependency."""
+def _stream_all(
+    client: FinAgentApiClient,
+    question: str,
+    sector: str,
+    panels: dict[str, Panel],
+) -> dict[str, list[StepEvent | Analysis | ApiClientError]]:
+    """Consume one SSE stream per persona on worker threads; render on this one."""
+    queues: dict[str, queue.Queue] = {p: queue.Queue() for p in panels}
 
-    def one(persona: str) -> Analysis | ApiClientError:
+    def worker(persona: str) -> None:
         try:
-            return client.analyze(query=question, persona=persona, sector=sector)
+            for item in client.stream_analysis(
+                query=question, persona=persona, sector=sector
+            ):
+                queues[persona].put(item)
         except ApiClientError as error:
-            return error
+            queues[persona].put(error)
+        finally:
+            queues[persona].put(None)
 
-    with ThreadPoolExecutor(max_workers=len(personas)) as pool:
-        return dict(zip(personas, pool.map(one, personas), strict=True))
+    for persona in panels:
+        threading.Thread(target=worker, args=(persona,), daemon=True).start()
+
+    history: dict[str, list] = {p: [] for p in panels}
+    active = set(panels)
+    while active:
+        for persona in list(active):
+            try:
+                item = queues[persona].get(timeout=0.05)
+            except queue.Empty:
+                continue
+            if item is None:
+                active.discard(persona)
+                continue
+            history[persona].append(item)
+            _dispatch(panels[persona], item)
+    return history
 
 
-def _render_error(error: ApiClientError) -> None:
-    st.error("The analysis could not be completed.")
-    st.write(str(error))
-    if error.retryable:
-        st.info("This failure may be temporary. Try again after the services recover.")
-    if error.request_id:
-        st.caption(f"Request ID: `{error.request_id}`")
+def _dispatch(panel: Panel, item: StepEvent | Analysis | ApiClientError) -> None:
+    if isinstance(item, StepEvent):
+        panel.on_step(item)
+    elif isinstance(item, Analysis):
+        panel.on_result(item)
+    else:
+        panel.on_error(item)
+
+
+def _apply_preset() -> None:
+    choice = st.session_state.get("preset")
+    if choice:
+        st.session_state["question"] = PRESETS[choice]
 
 
 def main() -> None:
     """Render the complete single-turn application."""
-    st.set_page_config(page_title="FinAgent", page_icon="📊", layout="wide")
+    compare = bool(st.session_state.get("compare", False))
+    st.set_page_config(
+        page_title="FinAgent",
+        page_icon=":material/query_stats:",
+        layout="wide" if compare else "centered",
+    )
     st.title("FinAgent")
     st.caption(
-        "One persona-configurable agent over an SEC-sourced sector dataset, "
-        "reached through MCP tools."
+        "Grounded sector research from public SEC data. One agent, three analyst "
+        "personas, every claim tied to a source."
     )
 
     client = _client()
     bootstrap_sector = st.session_state.get("sector", DEFAULT_SECTOR)
     catalog = _load_catalog(client, bootstrap_sector)
     if catalog is None:
-        st.info("Start the FastAPI and MCP services, then refresh this page.")
         st.stop()
-
     sector_values = [item.value for item in catalog.sectors]
     if bootstrap_sector not in sector_values:
         bootstrap_sector = sector_values[0]
 
     with st.sidebar:
-        selected_sector = st.selectbox(
+        sector = st.selectbox(
             "Sector",
             options=sector_values,
             index=sector_values.index(bootstrap_sector),
             format_func={item.value: item.label for item in catalog.sectors}.get,
             key="sector",
         )
-        if selected_sector != bootstrap_sector:
-            catalog = _load_catalog(client, selected_sector)
+        if sector != bootstrap_sector:
+            catalog = _load_catalog(client, sector)
             if catalog is None:
                 st.stop()
-
         persona_values = [item.value for item in catalog.personas]
         persona_labels = {item.value: item.label for item in catalog.personas}
-        persona_descriptions = {
-            item.value: item.description for item in catalog.personas
-        }
-        compare = st.toggle(
+        descriptions = {item.value: item.description for item in catalog.personas}
+        st.toggle(
             "Compare all three personas",
-            value=False,
+            key="compare",
             help="Ask the same question as every persona and show the answers side by side.",
         )
-        selected_persona = st.segmented_control(
-            "Analyst persona",
+        persona = st.segmented_control(
+            "Persona",
             options=persona_values,
-            format_func=persona_labels.get,
+            format_func=lambda v: f"{PERSONA_ICONS.get(v, '')} {persona_labels[v]}",
             default=persona_values[0],
             disabled=compare,
         )
-        if selected_persona:
-            st.caption(persona_descriptions[selected_persona])
-        _render_catalog_summary(catalog)
+        if persona and not compare:
+            st.caption(descriptions[persona])
+        st.space(size="small")
+        st.markdown("**Dataset**")
+        coverage = ""
+        if catalog.coverage_start or catalog.coverage_end:
+            coverage = f" · coverage {catalog.coverage_start} – {catalog.coverage_end}"
         st.caption(
-            "Companies: "
-            + ", ".join(item.ticker or item.name for item in catalog.companies)
+            f"{len(catalog.companies)} companies · v{catalog.dataset_version}{coverage}"
         )
+        st.caption(", ".join(item.ticker or item.name for item in catalog.companies))
 
-    with st.form("analysis_form", clear_on_submit=False):
-        example = st.selectbox(
-            "Sample question", options=("Write my own question", *EXAMPLE_QUESTIONS)
+    st.pills(
+        "Sample questions",
+        options=list(PRESETS),
+        key="preset",
+        on_change=_apply_preset,
+        label_visibility="collapsed",
+    )
+    question = st.text_area(
+        "Question",
+        key="question",
+        height=100,
+        placeholder=(
+            "Ask about the companies in this sector, e.g. who is improving margins "
+            "and who is under pressure."
+        ),
+    )
+    submitted = st.button(
+        "Analyze", type="primary", icon=":material/play_arrow:", width="stretch"
+    )
+
+    personas = persona_values if compare else [persona or persona_values[0]]
+    if submitted:
+        if len((question or "").strip()) < 3:
+            st.warning("Ask a question of at least three characters.")
+            return
+        st.session_state["run"] = {
+            "question": question.strip(),
+            "sector": sector,
+            "personas": personas,
+            "history": None,
+        }
+    run = st.session_state.get("run")
+    if run is None:
+        st.caption(
+            ":material/manage_search: Pick a preset or write a question. Answers use "
+            "only the sector dataset reached through MCP tools; nothing is fabricated."
         )
-        initial_question = "" if example == "Write my own question" else example
-        question = st.text_area(
-            "Question",
-            value=initial_question,
-            height=100,
-            placeholder="Ask a question grounded in the selected sector dataset.",
-        )
-        submitted = st.form_submit_button("Analyze", type="primary", width="stretch")
-
-    if not submitted:
-        st.info("Select a sector and persona, then submit one question.")
-        return
-    if len(question.strip()) < 3:
-        st.warning("Enter a question of at least three characters.")
         return
 
-    personas = persona_values if compare else [selected_persona or persona_values[0]]
-    with st.spinner("Retrieving, calculating, and validating source-backed evidence…"):
-        results = _run_analyses(client, question.strip(), personas, selected_sector)
+    panels: dict[str, Panel] = {}
+    columns = st.columns(len(run["personas"]), gap="medium")
+    for column, name in zip(columns, run["personas"], strict=True):
+        with column, st.container(border=True):
+            panel = Panel(name, persona_labels[name], catalog, compact=len(columns) > 1)
+            panel.mount()
+            panels[name] = panel
 
-    if compare:
-        columns = st.columns(len(personas))
-        for column, persona in zip(columns, personas, strict=True):
-            with column, st.container(border=True):
-                result = results[persona]
-                if isinstance(result, ApiClientError):
-                    _render_error(result)
-                else:
-                    _render_analysis(result, catalog, compact=True)
-        return
-
-    result = results[personas[0]]
-    if isinstance(result, ApiClientError):
-        _render_error(result)
+    if run["history"] is None:
+        run["history"] = _stream_all(client, run["question"], run["sector"], panels)
     else:
-        _render_analysis(result, catalog, compact=False)
+        # Replay the cached stream so reruns (expander clicks) do not re-request.
+        for name, items in run["history"].items():
+            for item in items:
+                _dispatch(panels[name], item)
 
 
 if __name__ == "__main__":

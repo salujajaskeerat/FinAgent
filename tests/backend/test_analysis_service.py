@@ -394,3 +394,36 @@ def test_untrusted_fallback_exits_before_planning_or_retrieval(
     assert data.event_query is None
     assert llm.plan_calls == 0
     assert llm.synthesis_calls == 0
+
+
+def test_row_level_caveats_are_collapsed_into_one_limitation() -> None:
+    class _NoisyGateway(StubDataGateway):
+        async def query_observations(
+            self,
+            sector: Sector,
+            entity_ids: list[str],
+            metric_keys: list[str],
+            latest_only: bool,
+        ) -> ObservationResult:
+            result = await super().query_observations(
+                sector, entity_ids, metric_keys, latest_only
+            )
+            result.warnings.extend(
+                f"annual:1:2024:{key}: Values follow issuer XBRL tags."
+                for key in metric_keys
+            )
+            result.warnings.append(
+                "market:1:2025-06-30: Public float excludes insiders."
+            )
+            return result
+
+    result = asyncio.run(
+        _service(_NoisyGateway()).analyze(
+            AnalysisRequest(query="Assess.", persona=Persona.EQUITY, sector=Sector.TECH)
+        )
+    )
+
+    caveats = [item for item in result.limitations if "XBRL" in item or "float" in item]
+    assert len(caveats) == 2
+    assert caveats[0].endswith("rows)")
+    assert caveats[1] == "Public float excludes insiders."

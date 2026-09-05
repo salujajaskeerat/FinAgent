@@ -262,7 +262,7 @@ class AnalysisService:
             if entity.entity_id in referenced_ids
         ]
         coverage = self._coverage(policy, plan, observations, events)
-        limitations = [*draft.limitations, *evidence.warnings]
+        limitations = [*draft.limitations, *self._collapse_warnings(evidence.warnings)]
         if coverage.missing_metrics:
             limitations.insert(
                 0,
@@ -313,6 +313,19 @@ class AnalysisService:
             repaired=repaired,
             llm_calls=llm_calls,
         )
+
+    @staticmethod
+    def _collapse_warnings(warnings: list[str]) -> list[str]:
+        """Group per-row MCP caveats ("<row id>: <text>") by their text."""
+        counts: dict[str, int] = {}
+        for warning in warnings:
+            _, _, text = warning.partition(": ")
+            text = text or warning
+            counts[text] = counts.get(text, 0) + 1
+        return [
+            f"{text} ({count} rows)" if count > 1 else text
+            for text, count in counts.items()
+        ]
 
     @staticmethod
     def _coverage(

@@ -17,6 +17,7 @@ from ui.api_client import (
     PersonaOption,
     SectorOption,
     Source,
+    StepEvent,
     Trace,
 )
 
@@ -67,6 +68,13 @@ class _StubClient:
     def analyze(self, *, query: str, persona: str, sector: str) -> Analysis:
         return _analysis(persona)
 
+    def stream_analysis(self, *, query: str, persona: str, sector: str):
+        for index, state in enumerate(
+            ("resolving_scope", "planning", "retrieving", "completed")
+        ):
+            yield StepEvent(state, f"step {index} done", elapsed_ms=100 * index)
+        yield _analysis(persona)
+
 
 def test_page_renders_and_compare_mode_shows_three_columns() -> None:
     with patch("ui.api_client.FinAgentApiClient", _StubClient):
@@ -75,11 +83,20 @@ def test_page_renders_and_compare_mode_shows_three_columns() -> None:
         assert app.title[0].value == "FinAgent"
 
         app.sidebar.toggle[0].set_value(True)
-        app.main.selectbox[0].select("What do you think about Tesla?")
+        app.text_area[0].set_value("Is this sector attractive?")
         app.button[0].click().run()
         assert not app.exception
         assert len(app.columns) == 3
         markdown = " ".join(item.value for item in app.markdown)
         assert "mutual_fund_analyst view" in markdown
         assert "pe_analyst view" in markdown
+        assert "Model proposed" in markdown
+        statuses = [item.label for item in app.status]
+        assert any(label.startswith("Completed in") for label in statuses)
+        assert "Resolved scope" in statuses and "Planned retrieval" in statuses
         assert "Derived metrics" in " ".join(item.label for item in app.expander)
+
+        # A rerun without pressing Analyze replays the cached stream.
+        app.run()
+        assert not app.exception
+        assert len(app.columns) == 3

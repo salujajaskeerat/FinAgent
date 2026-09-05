@@ -200,9 +200,17 @@ to loopback and has no authentication; a public deployment would need both.
 
 ```http
 POST /v1/analyses          {query, persona, sector} -> AnalysisResponse
+POST /v1/analyses/stream   same body; server-sent events: one `step` per workflow
+                           state, then `result` (the same AnalysisResponse) or `error`
 GET  /v1/catalog?sector=   personas, sectors, companies, metric keys, coverage
 GET  /health/live · /health/ready
 ```
+
+The Streamlit page consumes the stream, so the agent's workflow is visible
+while it runs: each state appears as a timeline step with a one-line summary
+("Resolved 4 of 4 companies", "Model proposed 3 metrics; running 6", "Computed
+24 derived metrics", "All 6 findings grounded in 5 sources"), and the planning
+step shows the model's proposal next to what the application actually ran.
 
 `AnalysisResponse` (schema 1.1) is built for programmatic consumers:
 

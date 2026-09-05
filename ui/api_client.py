@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -127,6 +127,15 @@ class Trace:
 
 
 @dataclass(frozen=True)
+class StepEvent:
+    """One workflow state transition streamed by the API."""
+
+    state: str
+    message: str
+    elapsed_ms: int
+
+
+@dataclass(frozen=True)
 class Analysis:
     """Evidence-aware analysis response consumed by the UI."""
 
@@ -205,6 +214,78 @@ class FinAgentApiClient:
             body={"query": query, "persona": persona, "sector": sector},
         )
         return _parse_analysis(payload)
+
+    def stream_analysis(
+        self, *, query: str, persona: str, sector: str
+    ) -> Iterator[StepEvent | Analysis]:
+        """Yield workflow steps as they happen, then the final analysis.
+
+        Parameters
+        ----------
+        query, persona, sector
+            Same inputs as :meth:`analyze`.
+
+        Yields
+        ------
+        StepEvent or Analysis
+            Each state transition, followed by exactly one ``Analysis``.
+
+        Raises
+        ------
+        ApiClientError
+            For an ``error`` event or a transport failure.
+        """
+        encoded = json.dumps(
+            {"query": query, "persona": persona, "sector": sector}
+        ).encode("utf-8")
+        request = Request(
+            f"{self._base_url}/v1/analyses/stream",
+            data=encoded,
+            headers={
+                "Accept": "text/event-stream",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self._timeout_seconds) as response:
+                event, data = "", []
+                for raw in response:
+                    line = raw.decode("utf-8").rstrip("\n")
+                    if line.startswith("event: "):
+                        event = line[7:]
+                    elif line.startswith("data: "):
+                        data.append(line[6:])
+                    elif not line and event:
+                        payload = _decode_object("\n".join(data).encode("utf-8"))
+                        event, data = "", []
+                        if payload.get("state") is not None and "message" in payload:
+                            yield StepEvent(
+                                state=str(payload["state"]),
+                                message=str(payload.get("message", "")),
+                                elapsed_ms=int(payload.get("elapsed_ms", 0)),
+                            )
+                        elif "code" in payload and "answer_markdown" not in payload:
+                            raise ApiClientError(
+                                str(payload.get("detail", "The analysis failed.")),
+                                code=str(payload["code"]),
+                                request_id=payload.get("request_id"),
+                                retryable=int(payload.get("status", 500))
+                                in {429, 502, 503, 504},
+                            )
+                        else:
+                            yield _parse_analysis(payload)
+                            return
+        except HTTPError as error:
+            self._raise_http_error(error)
+        except (URLError, TimeoutError, OSError) as error:
+            reason = getattr(error, "reason", error)
+            raise ApiUnavailableError(
+                f"The analysis service is unavailable: {reason}",
+                code="service_unavailable",
+                retryable=True,
+            ) from error
+        raise ApiClientError("The analysis stream ended without a result.")
 
     def _request(
         self,

@@ -1,0 +1,63 @@
+# FinAgent theme: light, low-saturation slate-and-navy analyst tool.
+# Colour is reserved for evidence status (green/orange/red); personas are icons.
+[theme]
+base = "light"
+font = "'IBM Plex Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+headingFont = "'IBM Plex Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@500;600&display=swap"
+codeFont = "'IBM Plex Mono':https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap"
+baseFontSize = 15
+codeFontSize = "0.85rem"
+headingFontSizes = ["28px", "22px", "18px", "16px", "14px", "13px"]
+headingFontWeights = [600, 600, 600, 500, 500, 500]
+baseRadius = "6px"
+buttonRadius = "6px"
+showWidgetBorder = true
+showSidebarBorder = true
+linkUnderline = false
+
+[theme.light]
+primaryColor = "#1E4FA3"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F6F9"
+codeBackgroundColor = "#F1F4F8"
+textColor = "#0F172A"
+borderColor = "#DDE3EA"
+linkColor = "#1E4FA3"
+greenColor = "#15803D"
+orangeColor = "#C2410C"
+redColor = "#B91C1C"
+blueColor = "#1E4FA3"
+violetColor = "#6D28D9"
+grayColor = "#64748B"
+dataframeBorderColor = "#DDE3EA"
+dataframeHeaderBackgroundColor = "#F4F6F9"
+
+[theme.light.sidebar]
+backgroundColor = "#F8FAFC"
+secondaryBackgroundColor = "#EEF2F7"
+borderColor = "#DDE3EA"
+
+[theme.dark]
+primaryColor = "#7AA2F7"
+backgroundColor = "#0F172A"
+secondaryBackgroundColor = "#1E293B"
+codeBackgroundColor = "#1E293B"
+textColor = "#E2E8F0"
+borderColor = "#334155"
+linkColor = "#7AA2F7"
+greenColor = "#34D399"
+orangeColor = "#FB923C"
+redColor = "#F87171"
+blueColor = "#7AA2F7"
+violetColor = "#A78BFA"
+grayColor = "#94A3B8"
+dataframeBorderColor = "#334155"
+dataframeHeaderBackgroundColor = "#1E293B"
+
+[theme.dark.sidebar]
+backgroundColor = "#0B1220"
+secondaryBackgroundColor = "#1E293B"
+borderColor = "#334155"
+
+[browser]
+gatherUsageStats = false
