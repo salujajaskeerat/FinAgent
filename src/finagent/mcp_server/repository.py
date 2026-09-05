@@ -33,7 +33,7 @@ _ANNUAL_METRICS = (
     "cash_and_equivalents",
     "total_debt",
 )
-_MARKET_METRICS = ("share_price", "market_cap", "enterprise_value")
+_MARKET_METRICS = ("share_price", "public_float", "market_cap", "enterprise_value")
 
 _EXPLICIT_COMPANY_PATTERNS = (
     re.compile(

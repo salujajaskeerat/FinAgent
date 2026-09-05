@@ -90,6 +90,7 @@ CREATE TABLE market_snapshots (
     as_of TEXT NOT NULL,
     currency TEXT NOT NULL DEFAULT 'USD',
     share_price REAL,
+    public_float REAL,
     market_cap REAL,
     enterprise_value REAL,
     quality_caveat TEXT NOT NULL,
@@ -144,6 +145,7 @@ FLOW_METRICS: dict[str, tuple[str, ...]] = {
     "capital_expenditure": (
         "PaymentsToAcquirePropertyPlantAndEquipment",
         "PaymentsForAdditionsToPropertyPlantAndEquipment",
+        "PaymentsToAcquireProductiveAssets",
     ),
 }
 
@@ -721,26 +723,32 @@ def _insert_report_market_snapshot(
     filing_text: str,
     source_id: str,
 ) -> int:
-    disclosure = _extract_cover_share_price(filing_text)
-    if disclosure is None:
+    price = _extract_cover_share_price(filing_text)
+    public_float = _extract_public_float(filing_text)
+    if price is None and public_float is None:
         return 0
-    as_of, share_price = disclosure
+    as_of = (public_float or price)[0]
+    share_price = price[1] if price and price[0] == as_of else None
     connection.execute(
         """
         INSERT INTO market_snapshots(
-            id, company_id, as_of, currency, share_price,
+            id, company_id, as_of, currency, share_price, public_float,
             market_cap, enterprise_value, quality_caveat, source_id
-        ) VALUES (?, ?, ?, 'USD', ?, NULL, NULL, ?, ?)
+        ) VALUES (?, ?, ?, 'USD', ?, ?, NULL, NULL, ?, ?)
         """,
         (
             f"market:{company.padded_cik}:{as_of}",
             _company_id(company),
             as_of,
             share_price,
+            public_float[1] if public_float else None,
             (
-                "Closing share price regex-extracted from the SEC annual-report "
-                "public-float disclosure. Market capitalization and enterprise "
-                "value are intentionally unavailable."
+                "Public float is the 10-K cover-page aggregate market value of "
+                "stock held by non-affiliates as of the stated date; it excludes "
+                "insider holdings and is not total market capitalization. Share "
+                "price, where present, is the closing price quoted in the same "
+                "disclosure. Market capitalization and enterprise value are "
+                "intentionally unavailable."
             ),
             source_id,
         ),
@@ -969,6 +977,68 @@ def _extract_cover_share_price(text: str) -> tuple[str, float] | None:
             return observed_at, float(price_text.replace(",", ""))
         except ValueError:
             continue
+    return None
+
+
+_SCALE_WORDS = {"trillion": 1e12, "billion": 1e9, "million": 1e6}
+_DATE_PATTERN = re.compile(r"([A-Z][a-z]+\s+\d{1,2},\s+\d{4})")
+
+
+def _extract_public_float(text: str) -> tuple[str, float] | None:
+    """Parse the 10-K cover-page public float and its measurement date.
+
+    Every 10-K cover states the aggregate market value of stock held by
+    non-affiliates as of the last day of the second fiscal quarter. The value
+    is written either as a full dollar figure or with a billion/trillion scale
+    word, and the date may precede the sentence or follow the value.
+
+    Parameters
+    ----------
+    text
+        Plain text of the annual report.
+
+    Returns
+    -------
+    tuple[str, float] or None
+        ISO measurement date and the float in USD, or ``None`` if absent.
+    """
+    phrase = re.search(r"aggregate\s+market\s+value", text, flags=re.IGNORECASE)
+    if phrase is None:
+        return None
+    window_start = max(0, phrase.start() - 400)
+    window = text[window_start : phrase.end() + 900]
+    phrase_offset = phrase.start() - window_start
+    amount: float | None = None
+    value_position = 0
+    for value_match in re.finditer(
+        r"\$\s*([\d,]+(?:\.\d+)?)\s*(trillion|billion|million)?",
+        window[phrase_offset:],
+        flags=re.IGNORECASE,
+    ):
+        candidate = float(value_match.group(1).replace(",", ""))
+        scale = value_match.group(2)
+        if scale:
+            candidate *= _SCALE_WORDS[scale.lower()]
+        if candidate >= 1e8:  # skip par values and per-share prices
+            amount = candidate
+            value_position = phrase_offset + value_match.start()
+            break
+    if amount is None:
+        return None
+    before = [m for m in _DATE_PATTERN.finditer(window) if m.end() <= value_position]
+    after = [
+        m
+        for m in _DATE_PATTERN.finditer(window)
+        if value_position < m.start() <= value_position + 160
+    ]
+    candidates = [before[-1]] if before else after[:1]
+    for match in candidates:
+        try:
+            parsed = time.strptime(match.group(1), "%B %d, %Y")
+        except ValueError:
+            continue
+        as_of = date(parsed.tm_year, parsed.tm_mon, parsed.tm_mday).isoformat()
+        return as_of, amount
     return None
 
 

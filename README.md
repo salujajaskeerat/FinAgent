@@ -137,12 +137,14 @@ metrics, and headcount/guidance/restructuring signals. Its sources are explicit
 fixture placeholders and every row is labelled as illustrative; use the SEC
 pipeline for research-grade data.
 
-The current real-data build contains 36 annual snapshots, 12 headcount signals,
-2 filing-disclosed share prices, and 22 derived benchmark observations. SEC
-filings do not consistently state a per-share cover price, so missing market
-rows remain absent. `market_cap`, `enterprise_value`, guidance, and restructuring
-are never inferred or fabricated; analyses report partial or insufficient
-evidence when those fields are required.
+The committed real-data build contains 36 annual snapshots (three fiscal years
+for each of 12 companies), 12 headcount signals, 12 cover-page public-float
+disclosures (2 with a quoted closing price), and 24 derived sector-median
+observations. `public_float` is the 10-K cover-page aggregate market value held
+by non-affiliates; it is stored under its own name because it excludes insider
+holdings and is not market capitalization. `market_cap`, `enterprise_value`,
+guidance, and restructuring are never inferred or fabricated; analyses report
+the gap in `coverage` and `limitations` when a persona prefers those fields.
 
 ## Run the services
 

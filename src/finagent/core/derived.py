@@ -226,6 +226,29 @@ def _vs_benchmark(metric: str, key: str) -> _Derivation:
     return derivation
 
 
+def _fcf_yield_on_float(
+    entity_id: str, series: _Series, _benchmark: _Series | None
+) -> DerivedMetric | None:
+    fcf, public_float = (
+        _latest(series, "free_cash_flow"),
+        _latest(series, "public_float"),
+    )
+    if fcf is None or public_float is None or public_float.value <= 0:
+        return None
+    return _metric(
+        "fcf_yield_on_float",
+        entity_id,
+        fcf.value / public_float.value,
+        "ratio",
+        "free_cash_flow / public_float",
+        [fcf, public_float],
+        caveat=(
+            "Public float excludes affiliate holdings and is dated at the second "
+            "fiscal quarter, so this understates a market-cap-based yield."
+        ),
+    )
+
+
 DERIVATIONS: dict[str, _Derivation] = {
     "revenue_growth_yoy": _growth("revenue", "revenue_growth_yoy"),
     "operating_income_growth_yoy": _growth(
@@ -240,6 +263,7 @@ DERIVATIONS: dict[str, _Derivation] = {
     ),
     "net_debt": _net_debt,
     "net_debt_to_free_cash_flow": _net_debt_to_fcf,
+    "fcf_yield_on_float": _fcf_yield_on_float,
     "operating_margin_vs_sector_median": _vs_benchmark(
         "operating_margin", "operating_margin_vs_sector_median"
     ),

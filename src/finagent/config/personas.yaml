@@ -39,12 +39,14 @@ mutual_fund_analyst:
     - operating_margin
     - free_cash_flow
   preferred_metrics:
+    - public_float
     - market_cap
   include_benchmark: true
   derived_metrics:
     - revenue_growth_yoy
     - operating_margin_delta_yoy
     - fcf_margin
+    - fcf_yield_on_float
     - operating_margin_vs_sector_median
     - revenue_vs_sector_median
   event_kinds:
@@ -80,12 +82,14 @@ equity_analyst:
     - operating_income
     - operating_margin
   preferred_metrics:
+    - public_float
     - enterprise_value
     - share_price
   derived_metrics:
     - revenue_growth_yoy
     - operating_income_growth_yoy
     - operating_margin_delta_yoy
+    - fcf_yield_on_float
   event_kinds:
     - guidance
     - headcount
@@ -122,6 +126,7 @@ pe_analyst:
     - cash_and_equivalents
     - capital_expenditure
   preferred_metrics:
+    - public_float
     - enterprise_value
     - revenue
   derived_metrics:
@@ -129,6 +134,7 @@ pe_analyst:
     - capex_intensity
     - net_debt
     - net_debt_to_free_cash_flow
+    - fcf_yield_on_float
   event_kinds:
     - guidance
     - headcount

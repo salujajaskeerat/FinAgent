@@ -6,7 +6,9 @@ import shutil
 import sqlite3
 from pathlib import Path
 
-from finagent.ingestion.builder import build_database
+import pytest
+
+from finagent.ingestion.builder import _extract_public_float, build_database
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -125,7 +127,8 @@ def test_build_enriches_from_cached_annual_report(tmp_path: Path) -> None:
         <html><body>
         <p>The Company employed approximately 1.275 thousand associates.</p>
         <p>The aggregate market value of voting stock held by non-affiliates as of
-        June 28, 2024, based on the closing price of $42.75 per share.</p>
+        June 28, 2024 was $1.5 billion, based on the closing price of $42.75 per
+        share.</p>
         </body></html>
         """,
         encoding="utf-8",
@@ -155,9 +158,9 @@ def test_build_enriches_from_cached_annual_report(tmp_path: Path) -> None:
     assert stats.benchmark_observations == 0
     with sqlite3.connect(output) as connection:
         market = connection.execute(
-            "SELECT as_of, share_price, market_cap FROM market_snapshots"
+            "SELECT as_of, share_price, public_float, market_cap FROM market_snapshots"
         ).fetchone()
-        assert market == ("2024-06-28", 42.75, None)
+        assert market == ("2024-06-28", 42.75, 1.5e9, None)
         headcount = connection.execute(
             "SELECT observed_at, value_numeric FROM operating_signals"
         ).fetchone()
@@ -235,3 +238,45 @@ def test_build_keeps_only_cited_sources(tmp_path: Path) -> None:
         ).fetchone()[0]
     assert uncited == 0
     assert cited >= 1
+
+
+_TARGET = (
+    "aggregate market value of the voting stock held by non-affiliates of the "
+    "registrant as of August 1, 2025, wa s $ 45,284,343,058 based on the closing "
+    "price of $99.77 per share."
+)
+_HOME_DEPOT = (
+    "aggregate market value of voting common stock held by non-affiliates of the "
+    "registrant on August 1, 2025 was $ 371.8 billion. Shares outstanding as of "
+    "March 4, 2026 was 996,011,466."
+)
+_MICROSOFT = (
+    "As of December 31, 2025, the aggregate market value of the registrant's "
+    "common stock held by non-affiliates was $ 3.6 trillion based on the closing "
+    "sale price. As of July 23, 2026, there were 7,425,545,491 shares outstanding."
+)
+_ADOBE = (
+    "aggregate market value of the registrant's common stock, $0.0001 par value "
+    "per share, held by non-affiliates on May 30, 2025 was $ 144.94 billion."
+)
+_UPS = (
+    "aggregate market value of the class B common stock held by non-affiliates "
+    "was $ 74,239,665,022 as of June 30, 2025."
+)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (_TARGET, ("2025-08-01", 45_284_343_058.0)),
+        (_HOME_DEPOT, ("2025-08-01", 371.8e9)),
+        (_MICROSOFT, ("2025-12-31", 3.6e12)),
+        (_ADOBE, ("2025-05-30", 144.94e9)),
+        (_UPS, ("2025-06-30", 74_239_665_022.0)),
+        ("The registrant is a smaller reporting company.", None),
+    ],
+)
+def test_public_float_parser_handles_real_cover_page_phrasings(
+    text: str, expected: tuple[str, float] | None
+) -> None:
+    assert _extract_public_float(text) == expected
