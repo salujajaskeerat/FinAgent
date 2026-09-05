@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+import time
 from collections.abc import Mapping
 from typing import Any, Protocol
 
@@ -14,6 +17,8 @@ from finagent.contracts.mcp import (
     ResolutionResult,
 )
 from finagent.core.errors import DependencyUnavailableError
+
+logger = logging.getLogger("finagent.mcp")
 
 
 class ToolCaller(Protocol):
@@ -56,19 +61,40 @@ class StreamableHttpToolCaller:
             If both bounded transport attempts fail.
         """
         last_error: Exception | None = None
+        started = time.perf_counter()
         for attempt in range(2):
             try:
                 async with asyncio.timeout(self._timeout_seconds):
-                    return await self._call_once(name, arguments)
+                    result = await self._call_once(name, arguments)
             except McpToolError:
+                self._log(name, started, attempt, "rejected")
                 raise
             except (OSError, TimeoutError, RuntimeError) as exc:
                 last_error = exc
                 if attempt == 0:
                     await asyncio.sleep(0.05)
+                continue
+            self._log(name, started, attempt, "ok")
+            return result
+        self._log(name, started, 1, "unavailable")
         raise DependencyUnavailableError(
             "MCP data service is unavailable"
         ) from last_error
+
+    @staticmethod
+    def _log(name: str, started: float, attempt: int, outcome: str) -> None:
+        """Emit one structured line per tool call; arguments are never logged."""
+        logger.info(
+            json.dumps(
+                {
+                    "event": "mcp_tool_call",
+                    "tool": name,
+                    "outcome": outcome,
+                    "attempts": attempt + 1,
+                    "latency_ms": round((time.perf_counter() - started) * 1_000, 2),
+                }
+            )
+        )
 
     async def _call_once(
         self,

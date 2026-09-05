@@ -97,6 +97,18 @@ class SectorRepository:
     def __init__(self, database_path: Path) -> None:
         self._database_path = database_path.resolve()
 
+    def describe_schema(self) -> str:
+        """Return the dataset's table and index definitions as SQL text."""
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT sql FROM sqlite_master
+                WHERE sql IS NOT NULL AND type IN ('table', 'index')
+                ORDER BY type DESC, name
+                """
+            ).fetchall()
+        return "\n\n".join(f"{row['sql']};" for row in rows)
+
     def get_catalog(self, sector: Sector) -> DatasetCatalog:
         """Return companies, benchmark, metric keys, and date coverage."""
         with closing(self._connect()) as connection:

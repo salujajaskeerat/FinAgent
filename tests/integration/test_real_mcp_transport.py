@@ -68,3 +68,47 @@ def test_all_tools_cross_real_mcp_http_transport(real_mcp_url: str) -> None:
             )
 
     asyncio.run(exercise())
+
+
+@pytest.mark.integration
+def test_tools_advertise_typed_schemas_and_read_only_annotations(
+    real_mcp_url: str,
+) -> None:
+    """What an MCP client (or Inspector) sees when it lists the server."""
+    from mcp import Client
+
+    async def inspect() -> None:
+        async with Client(real_mcp_url) as client:
+            tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+            resources = (await client.list_resources()).resources
+            schema = await client.read_resource("finagent://schema")
+
+        assert set(tools) == {
+            "get_catalog",
+            "resolve_companies",
+            "query_observations",
+            "query_events",
+        }
+        for tool in tools.values():
+            assert tool.annotations is not None
+            assert tool.annotations.read_only_hint is True
+            assert tool.annotations.destructive_hint is False
+            assert tool.annotations.idempotent_hint is True
+            assert tool.annotations.open_world_hint is False
+            assert tool.output_schema is not None
+            assert "properties" in tool.output_schema
+        observations = tools["query_observations"].output_schema
+        assert {"observations", "sources", "warnings"} <= set(
+            observations["properties"]
+        )
+        assert tools["query_observations"].input_schema["required"] == [
+            "sector",
+            "entity_ids",
+            "metric_keys",
+        ]
+        assert [str(item.uri) for item in resources] == ["finagent://schema"]
+        text = "".join(getattr(item, "text", "") for item in schema.contents)
+        assert "CREATE TABLE annual_financial_snapshots" in text
+        assert "CREATE TABLE source_lineage" in text
+
+    asyncio.run(inspect())
