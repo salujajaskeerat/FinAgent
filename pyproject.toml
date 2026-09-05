@@ -19,8 +19,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Provider SDKs are optional so a reviewer installs only the one they use.
+openai = ["openai>=1.50,<3"]
+anthropic = ["anthropic>=0.40,<2"]
 test = [
+  "anthropic>=0.40,<2",
   "httpx>=0.28,<1",
+  "openai>=1.50,<3",
   "pytest>=8.4,<10",
 ]
 

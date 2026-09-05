@@ -35,8 +35,9 @@ from finagent.core.errors import (
 )
 from finagent.core.persona_policy import PersonaPolicyStore
 from finagent.gateways.entity_resolver import build_entity_resolver
-from finagent.gateways.llm import LlmSettings, build_llm_gateway
+from finagent.gateways.llm import build_llm_gateway
 from finagent.gateways.mcp_client import McpDataGateway, StreamableHttpToolCaller
+from finagent.gateways.providers import LlmSettings, build_provider
 
 logger = logging.getLogger("finagent.api")
 
@@ -49,12 +50,14 @@ def build_service() -> AnalysisService:
     mcp_url = os.getenv("FINAGENT_MCP_URL", "http://127.0.0.1:8001/mcp")
     timeout = float(os.getenv("FINAGENT_ANALYSIS_TIMEOUT_SECONDS", "45"))
     llm_settings = LlmSettings.from_env()
+    # One vendor adapter is shared by the analysis gateway and entity resolver.
+    provider = build_provider(llm_settings)
     return AnalysisService(
         data_gateway=McpDataGateway(StreamableHttpToolCaller(mcp_url)),
-        llm_gateway=build_llm_gateway(llm_settings),
+        llm_gateway=build_llm_gateway(llm_settings, provider),
         policies=PersonaPolicyStore.load(),
         deadline_seconds=timeout,
-        entity_resolver=build_entity_resolver(llm_settings),
+        entity_resolver=build_entity_resolver(llm_settings, provider),
     )
 
 

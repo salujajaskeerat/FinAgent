@@ -15,10 +15,11 @@ from finagent.core.models import DraftAnalysis, EvidenceBundle, RetrievalPlan
 from finagent.core.persona_policy import PersonaPolicyStore
 from finagent.gateways.llm import (
     FakeLlmGateway,
-    GeminiLlmGateway,
     LlmSettings,
+    StructuredLlmGateway,
     build_llm_gateway,
 )
+from finagent.gateways.providers.gemini import GeminiProvider
 from tests.backend.support import StubDataGateway
 
 
@@ -52,7 +53,13 @@ def _request() -> AnalysisRequest:
 
 
 def _settings(api_key: str | None = "test-only-key") -> LlmSettings:
-    return LlmSettings(api_key=api_key, timeout_seconds=2, max_attempts=2)
+    return LlmSettings(
+        provider="gemini", api_key=api_key, timeout_seconds=2, max_attempts=2
+    )
+
+
+def _gemini_gateway(generate: RecordingGenerateContent) -> StructuredLlmGateway:
+    return StructuredLlmGateway(GeminiProvider(_settings(), generate))
 
 
 def test_gemini_plan_uses_structured_output_without_receiving_tools() -> None:
@@ -64,7 +71,7 @@ def test_gemini_plan_uses_structured_output_without_receiving_tools() -> None:
         latest_only=True,
     )
     generate = RecordingGenerateContent(types.GenerateContentResponse(parsed=expected))
-    gateway = GeminiLlmGateway(_settings(), generate)
+    gateway = _gemini_gateway(generate)
 
     result = asyncio.run(
         gateway.plan(
@@ -104,7 +111,7 @@ def test_gemini_synthesis_sends_only_source_linked_evidence() -> None:
         }
     )
     generate = RecordingGenerateContent(types.GenerateContentResponse(parsed=expected))
-    gateway = GeminiLlmGateway(_settings(), generate)
+    gateway = _gemini_gateway(generate)
     observation_result = asyncio.run(
         data.query_observations(
             Sector.TECH,
@@ -133,7 +140,7 @@ def test_gemini_synthesis_sends_only_source_linked_evidence() -> None:
 
 def test_gemini_missing_key_fails_without_a_network_call() -> None:
     with pytest.raises(DependencyUnavailableError, match="GEMINI_API_KEY"):
-        GeminiLlmGateway(_settings(api_key=None))
+        GeminiProvider(_settings(api_key=None))
 
 
 def test_llm_settings_repr_never_contains_the_api_key() -> None:
@@ -152,7 +159,7 @@ def test_gemini_maps_rate_limit_without_leaking_upstream_detail() -> None:
             }
         },
     )
-    gateway = GeminiLlmGateway(_settings(), RecordingGenerateContent(error=upstream))
+    gateway = _gemini_gateway(RecordingGenerateContent(error=upstream))
 
     with pytest.raises(RateLimitError, match="bounded retries") as caught:
         asyncio.run(
@@ -180,4 +187,34 @@ def test_provider_selection_requires_explicit_fake(
         build_llm_gateway()
 
     monkeypatch.setenv("GEMINI_API_KEY", "test-only-key")
-    assert isinstance(build_llm_gateway(), GeminiLlmGateway)
+    gateway = build_llm_gateway()
+    assert isinstance(gateway, StructuredLlmGateway)
+    assert gateway.provider_name == "gemini"
+
+
+def test_generic_llm_api_key_selects_any_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One LLM_API_KEY variable configures every provider; legacy names still work."""
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("LLM_API_KEY", "test-only-key")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+
+    settings = LlmSettings.from_env()
+    assert settings.provider == "anthropic"
+    assert settings.api_key == "test-only-key"
+    assert settings.model == "claude-opus-5"
+    assert build_llm_gateway(settings).provider_name == "anthropic"
+
+    monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.delenv("LLM_API_KEY")
+    settings = LlmSettings.from_env()
+    assert settings.base_url == "http://localhost:11434/v1"
+    assert settings.api_key is None  # local servers need no key
+    assert build_llm_gateway(settings).provider_name == "openai_compatible"
+
+    monkeypatch.setenv("LLM_PROVIDER", "not-a-provider")
+    with pytest.raises(ValueError, match="LLM_PROVIDER"):
+        LlmSettings.from_env()

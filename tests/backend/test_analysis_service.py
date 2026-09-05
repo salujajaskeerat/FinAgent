@@ -249,7 +249,9 @@ def test_required_metrics_are_retrieved_even_if_model_omits_them() -> None:
 
     result = asyncio.run(
         service.analyze(
-            AnalysisRequest(query="Analyze revenue.", persona=Persona.PE, sector=Sector.TECH)
+            AnalysisRequest(
+                query="Analyze revenue.", persona=Persona.PE, sector=Sector.TECH
+            )
         )
     )
 
@@ -268,7 +270,9 @@ def test_mutual_fund_plan_always_includes_the_sector_benchmark() -> None:
     asyncio.run(
         service.analyze(
             AnalysisRequest(
-                query="Analyze revenue.", persona=Persona.MUTUAL_FUND, sector=Sector.TECH
+                query="Analyze revenue.",
+                persona=Persona.MUTUAL_FUND,
+                sector=Sector.TECH,
             )
         )
     )

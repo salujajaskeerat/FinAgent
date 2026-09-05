@@ -18,8 +18,9 @@ from finagent.contracts.entity_resolution import (
     EntityResolutionStatus,
 )
 from finagent.core.errors import DependencyUnavailableError
-from finagent.gateways.entity_resolver import GeminiEntityResolver
+from finagent.gateways.entity_resolver import LlmEntityResolver
 from finagent.gateways.llm import LlmSettings
+from finagent.gateways.providers.gemini import GeminiProvider
 from tests.backend.support import StubDataGateway
 
 
@@ -37,7 +38,13 @@ class RecordingGenerateContent:
 
 
 def _settings() -> LlmSettings:
-    return LlmSettings(api_key="test-only-key", timeout_seconds=2, max_attempts=2)
+    return LlmSettings(
+        provider="gemini", api_key="test-only-key", timeout_seconds=2, max_attempts=2
+    )
+
+
+def _resolver(generated: RecordingGenerateContent) -> LlmEntityResolver:
+    return LlmEntityResolver(GeminiProvider(_settings(), generated))
 
 
 def _match(entity_id: str = "cmp_example", confidence: float = 0.9) -> EntityResolution:
@@ -57,7 +64,7 @@ def _match(entity_id: str = "cmp_example", confidence: float = 0.9) -> EntityRes
 def test_resolver_receives_only_selected_sector_catalog_candidates() -> None:
     """Send no tools or unrestricted entity universe to the resolver."""
     generated = RecordingGenerateContent(types.GenerateContentResponse(parsed=_match()))
-    resolver = GeminiEntityResolver(_settings(), generated)
+    resolver = _resolver(generated)
     candidates = [StubDataGateway().catalog_value.entities[0]]
 
     result = asyncio.run(
@@ -137,7 +144,7 @@ def test_gateway_maps_malformed_structured_output_to_safe_failure() -> None:
             "reason_code": "semantic_reference",
         }
     )
-    resolver = GeminiEntityResolver(_settings(), RecordingGenerateContent(response))
+    resolver = _resolver(RecordingGenerateContent(response))
 
     with pytest.raises(DependencyUnavailableError, match="invalid entity-resolution"):
         asyncio.run(

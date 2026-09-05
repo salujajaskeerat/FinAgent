@@ -10,7 +10,7 @@ import pytest
 from finagent.contracts.api import AnalysisRequest, AnalysisStatus, Persona, Sector
 from finagent.core.analysis_service import AnalysisService
 from finagent.core.persona_policy import PersonaPolicyStore
-from finagent.gateways.llm import GeminiLlmGateway, LlmSettings
+from finagent.gateways.llm import LlmSettings, build_llm_gateway
 from tests.backend.support import StubDataGateway
 
 pytestmark = [
@@ -26,7 +26,7 @@ def test_real_gemini_returns_a_grounded_analysis() -> None:
     """Exercise real planning and synthesis against public fixture evidence."""
     service = AnalysisService(
         StubDataGateway(),
-        GeminiLlmGateway(LlmSettings.from_env()),
+        build_llm_gateway(LlmSettings.from_env()),
         PersonaPolicyStore.load(),
         deadline_seconds=60,
     )

@@ -115,8 +115,13 @@ Problem Details via [api/errors.py](src/finagent/api/errors.py): 422 invalid req
   `config/personas.yaml`. The catalog is the allowlist the plan is constrained against.
 - **New persona** = a `Persona` enum value plus a `personas.yaml` block. `PersonaPolicyStore.load`
   raises if any enum member lacks a policy. Do not branch on persona in `AnalysisService`.
-- Default `LLM_PROVIDER=fake` keeps the suite offline and deterministic; `gemini` requires
-  `GEMINI_API_KEY`. `.env` is loaded with `override=False`, so exported env vars win.
+- The LLM layer is provider-neutral: `gateways/llm.py` owns prompts + validation and never
+  imports a vendor SDK; `gateways/providers/` holds one adapter per vendor behind the
+  `StructuredCompletionProvider` seam (`gemini`, `openai_compatible`, `anthropic`). Add a
+  provider by adding one adapter file and a branch in `providers/__init__.py`; never put
+  vendor code in the gateway or resolver. Config is `LLM_PROVIDER` / `LLM_MODEL` /
+  `LLM_API_KEY` / `LLM_BASE_URL`. Default `LLM_PROVIDER=fake` keeps the suite offline.
+  `.env` is loaded with `override=False`, so exported env vars win.
 - Docstrings are NumPy-style with Parameters/Returns/Raises sections; models are strict
   Pydantic; async throughout `core`, `gateways`, and `api`.
 - `data/finagent.db` is the real SEC build and the only database that should be shipped.

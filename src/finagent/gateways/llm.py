@@ -1,102 +1,104 @@
-"""Structured LLM gateway implementations."""
+"""Structured LLM gateway: prompts and validation, independent of any vendor.
+
+The gateway composes persona-aware prompts, hands a :class:`StructuredRequest`
+to whichever provider the environment selected, and validates the returned
+JSON against the expected Pydantic schema. No vendor SDK is imported here.
+"""
 
 from __future__ import annotations
 
-import asyncio
-import json
-import os
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
 from typing import TypeVar
 
-from google import genai
-from google.genai import errors, types
-from pydantic import ValidationError
+from pydantic import BaseModel
 
 from finagent.contracts.api import AnalysisRequest, Finding, Persona
 from finagent.contracts.mcp import DatasetCatalog, EntityKind
-from finagent.core.errors import DependencyUnavailableError, RateLimitError
+from finagent.core.errors import DependencyUnavailableError
 from finagent.core.models import DraftAnalysis, EvidenceBundle, RetrievalPlan
 from finagent.core.persona_policy import PersonaPolicy
+from finagent.gateways.providers import (
+    LlmSettings,
+    StructuredCompletionProvider,
+    StructuredRequest,
+    build_provider,
+)
 
-StructuredResult = TypeVar("StructuredResult", RetrievalPlan, DraftAnalysis)
-GenerateContent = Callable[..., Awaitable[types.GenerateContentResponse]]
+StructuredResult = TypeVar("StructuredResult", bound=BaseModel)
 
-
-@dataclass(frozen=True, slots=True)
-class LlmSettings:
-    """Environment-backed configuration for the LLM boundary."""
-
-    provider: str = "fake"
-    model: str = "gemini-2.5-flash-lite"
-    api_key: str | None = field(default=None, repr=False)
-    timeout_seconds: float = 20.0
-    max_attempts: int = 2
-
-    @classmethod
-    def from_env(cls) -> LlmSettings:
-        """Load LLM settings without exposing secret values.
-
-        Returns
-        -------
-        LlmSettings
-            Validated runtime configuration.
-
-        Raises
-        ------
-        ValueError
-            If a numeric setting is outside its safe range.
-        """
-        timeout_seconds = float(os.getenv("LLM_TIMEOUT_SECONDS", "20"))
-        max_attempts = int(os.getenv("LLM_MAX_ATTEMPTS", "2"))
-        if not 1 <= timeout_seconds <= 60:
-            raise ValueError("LLM_TIMEOUT_SECONDS must be between 1 and 60")
-        if not 1 <= max_attempts <= 5:
-            raise ValueError("LLM_MAX_ATTEMPTS must be between 1 and 5")
-        api_key = os.getenv("GEMINI_API_KEY", "").strip() or None
-        model = os.getenv("LLM_MODEL", "").strip() or "gemini-2.5-flash-lite"
-        return cls(
-            provider=os.getenv("LLM_PROVIDER", "fake").strip().lower(),
-            model=model,
-            api_key=api_key,
-            timeout_seconds=timeout_seconds,
-            max_attempts=max_attempts,
-        )
+__all__ = [
+    "FakeLlmGateway",
+    "LlmSettings",
+    "StructuredLlmGateway",
+    "build_llm_gateway",
+    "validate_structured_output",
+]
 
 
-class GeminiLlmGateway:
-    """Gemini adapter that exchanges only validated structured model output.
+def validate_structured_output(
+    schema: type[StructuredResult], raw: object, *, what: str
+) -> StructuredResult:
+    """Validate provider output against the expected schema.
 
-    Gemini proposes a retrieval plan, but it never receives MCP tools or performs
-    retrieval itself. The application service independently constrains the plan to
-    the selected dataset before making deterministic MCP calls.
+    Parameters
+    ----------
+    schema
+        Expected Pydantic model.
+    raw
+        Provider output: a model instance, a mapping, or a JSON string.
+    what
+        Short description used in error messages.
+
+    Returns
+    -------
+    StructuredResult
+        The validated model.
+
+    Raises
+    ------
+    DependencyUnavailableError
+        If the output is empty or does not match the schema.
+    """
+    try:
+        if isinstance(raw, schema):
+            return raw
+        if isinstance(raw, BaseModel):
+            return schema.model_validate(raw.model_dump())
+        if isinstance(raw, dict):
+            return schema.model_validate(raw)
+        if isinstance(raw, str) and raw.strip():
+            return schema.model_validate_json(_strip_code_fence(raw))
+    except Exception as exc:  # any malformed output is a provider failure
+        raise DependencyUnavailableError(
+            f"The model returned an invalid {what} response."
+        ) from exc
+    raise DependencyUnavailableError(f"The model returned no {what} response.")
+
+
+def _strip_code_fence(text: str) -> str:
+    """Tolerate providers that wrap JSON in a Markdown code fence."""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = stripped.split("\n", 1)[1] if "\n" in stripped else ""
+        if stripped.rstrip().endswith("```"):
+            stripped = stripped.rstrip()[:-3]
+    return stripped
+
+
+class StructuredLlmGateway:
+    """Provider-agnostic planner, synthesizer, and repairer.
+
+    The model proposes a retrieval plan but never receives MCP tools or
+    performs retrieval itself; the application service constrains the plan
+    before making deterministic MCP calls.
     """
 
-    def __init__(
-        self,
-        settings: LlmSettings,
-        generate_content: GenerateContent | None = None,
-    ) -> None:
-        """Configure the adapter.
+    def __init__(self, provider: StructuredCompletionProvider) -> None:
+        self._provider = provider
 
-        Parameters
-        ----------
-        settings
-            Provider settings. The API key is held in memory and never logged.
-        generate_content
-            Optional SDK-compatible async function used by offline unit tests.
-
-        Raises
-        ------
-        DependencyUnavailableError
-            If Gemini is selected without an API key.
-        """
-        if not settings.api_key:
-            raise DependencyUnavailableError(
-                "Gemini is configured but GEMINI_API_KEY is not set."
-            )
-        self._settings = settings
-        self._generate_content = generate_content
+    @property
+    def provider_name(self) -> str:
+        """Name of the underlying vendor adapter."""
+        return self._provider.name
 
     async def plan(
         self,
@@ -123,6 +125,7 @@ class GeminiLlmGateway:
             ),
             payload=payload,
             max_output_tokens=512,
+            what="retrieval plan",
         )
 
     async def synthesize(
@@ -149,6 +152,7 @@ class GeminiLlmGateway:
             ),
             payload=payload,
             max_output_tokens=2_048,
+            what="analysis",
         )
 
     async def repair(
@@ -177,6 +181,7 @@ class GeminiLlmGateway:
             ),
             payload=payload,
             max_output_tokens=2_048,
+            what="repair",
         )
 
     async def _generate(
@@ -186,105 +191,45 @@ class GeminiLlmGateway:
         system_instruction: str,
         payload: dict[str, object],
         max_output_tokens: int,
+        what: str,
+        thinking_budget: int = 0,
     ) -> StructuredResult:
-        generate_content = self._generate_content or self._build_generate_content()
-        config = types.GenerateContentConfig(
-            system_instruction=system_instruction,
-            temperature=0.1,
-            candidate_count=1,
-            max_output_tokens=max_output_tokens,
-            thinking_config=types.ThinkingConfig(thinking_budget=0),
-            response_mime_type="application/json",
-            response_schema=schema,
+        raw = await self._provider.complete_structured(
+            StructuredRequest(
+                system_instruction=system_instruction,
+                payload=payload,
+                schema=schema,
+                max_output_tokens=max_output_tokens,
+                thinking_budget=thinking_budget,
+            )
         )
-        try:
-            async with asyncio.timeout(self._settings.timeout_seconds):
-                response = await generate_content(
-                    model=self._settings.model,
-                    contents=json.dumps(payload, separators=(",", ":")),
-                    config=config,
-                )
-        except errors.APIError as exc:
-            if exc.code == 429:
-                raise RateLimitError(
-                    "Gemini rate limit exceeded after bounded retries."
-                ) from exc
-            raise DependencyUnavailableError(
-                "Gemini could not complete the structured model request."
-            ) from exc
-        except TimeoutError as exc:
-            raise DependencyUnavailableError(
-                "Gemini did not respond within the configured timeout."
-            ) from exc
-        except Exception as exc:
-            raise DependencyUnavailableError(
-                "Gemini could not complete the structured model request."
-            ) from exc
-
-        try:
-            if isinstance(response.parsed, schema):
-                return response.parsed
-            if response.parsed is not None:
-                return schema.model_validate(response.parsed)
-            if response.text:
-                return schema.model_validate_json(response.text)
-        except (TypeError, ValueError, ValidationError) as exc:
-            raise DependencyUnavailableError(
-                "Gemini returned an invalid structured response."
-            ) from exc
-        raise DependencyUnavailableError("Gemini returned no structured response.")
-
-    def _build_generate_content(self) -> GenerateContent:
-        return self._generate_with_sdk
-
-    async def _generate_with_sdk(
-        self, **kwargs: object
-    ) -> types.GenerateContentResponse:
-        """Execute one SDK request and close its HTTP resources afterward."""
-        client = genai.Client(
-            api_key=self._settings.api_key,
-            http_options=types.HttpOptions(
-                timeout=int(self._settings.timeout_seconds * 1_000),
-                retry_options=types.HttpRetryOptions(
-                    attempts=self._settings.max_attempts,
-                    initial_delay=0.5,
-                    max_delay=2.0,
-                    exp_base=2.0,
-                    jitter=0.2,
-                    http_status_codes=[408, 429, 500, 502, 503, 504],
-                ),
-            ),
-        )
-        async with client.aio as async_client:
-            return await async_client.models.generate_content(**kwargs)
+        return validate_structured_output(schema, raw, what=what)
 
 
 def build_llm_gateway(
     settings: LlmSettings | None = None,
-) -> GeminiLlmGateway | FakeLlmGateway:
-    """Build the explicitly configured model adapter.
+    provider: StructuredCompletionProvider | None = None,
+) -> StructuredLlmGateway | FakeLlmGateway:
+    """Build the gateway for the configured provider.
 
     Parameters
     ----------
     settings
         Optional settings override for tests and composition roots.
+    provider
+        Optional already-built provider to share between gateways.
 
     Returns
     -------
-    GeminiLlmGateway or FakeLlmGateway
-        Selected structured model adapter.
-
-    Raises
-    ------
-    ValueError
-        If the provider is unsupported.
+    StructuredLlmGateway or FakeLlmGateway
+        The fake gateway when ``LLM_PROVIDER=fake``; otherwise a gateway
+        bound to the vendor adapter.
     """
     configured = settings or LlmSettings.from_env()
-    if configured.provider == "fake":
+    built = provider if provider is not None else build_provider(configured)
+    if built is None:
         return FakeLlmGateway()
-    if configured.provider == "gemini":
-        return GeminiLlmGateway(configured)
-    raise ValueError("LLM_PROVIDER must be 'gemini' or 'fake'")
+    return StructuredLlmGateway(built)
 
 
 class FakeLlmGateway:
