@@ -205,6 +205,12 @@ class AnalysisService:
         }
         evidence = EvidenceBundle(
             company_ids=target_ids,
+            entity_names={
+                entity.entity_id: (
+                    f"{entity.name} ({entity.ticker})" if entity.ticker else entity.name
+                )
+                for entity in catalog.entities
+            },
             observations=observations.observations,
             events=events.events,
             source_ids=set(source_map),

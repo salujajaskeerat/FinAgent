@@ -245,6 +245,9 @@ app = create_app()
 
 def run() -> None:
     """Run the API development server."""
+    logging.basicConfig(
+        level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
+    )
     uvicorn.run(
         "finagent.api.app:app",
         host=os.getenv("FINAGENT_API_HOST", "127.0.0.1"),

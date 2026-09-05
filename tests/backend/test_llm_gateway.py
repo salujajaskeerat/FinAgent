@@ -271,7 +271,7 @@ def test_synthesis_uses_persona_instruction_and_thinking_budget() -> None:
     assert "PE Analyst" in config.system_instruction
     assert "Entry and leverage case" in config.system_instruction
     assert config.thinking_config.thinking_budget == 512
-    assert config.max_output_tokens == 4_096
+    assert config.max_output_tokens == 8_192
 
 
 def test_fake_provider_digest_differs_by_persona_and_stays_grounded() -> None:

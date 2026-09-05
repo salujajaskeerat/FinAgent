@@ -234,7 +234,7 @@ deadline exceeded → 504, all as RFC 7807 Problem Details with `X-Request-ID`.
 uv run pytest                    # 113 tests, offline; includes a real MCP server subprocess
 uv run pytest -m integration     # only the real-transport tests
 make lint
-uv run python scripts/eval_matrix.py   # against a running API -> docs/EVAL.md
+uv run python scripts/eval_matrix.py   # against a running API -> docs/EVAL.md (committed run: Gemini)
 RUN_LIVE_GEMINI_TEST=1 uv run --env-file .env pytest -m live   # one opt-in real call
 ```
 

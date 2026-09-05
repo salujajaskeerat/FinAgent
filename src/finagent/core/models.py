@@ -29,6 +29,9 @@ class EvidenceBundle(StrictModel):
     """Evidence made available to synthesis."""
 
     company_ids: list[str] = Field(default_factory=list)
+    # entity_id -> "Name (TICKER)", so prose can name companies while findings
+    # keep canonical IDs for validation.
+    entity_names: dict[str, str] = Field(default_factory=dict)
     observations: list[Observation] = Field(default_factory=list)
     events: list[Event] = Field(default_factory=list)
     derived: list[DerivedMetric] = Field(default_factory=list)
