@@ -8,6 +8,7 @@ from pathlib import Path
 from .builder import build_database
 from .config import SecDownloadConfig
 from .manifest import load_manifest
+from .sample_data import build_sample_database
 from .sec_client import download_manifest
 
 
@@ -41,6 +42,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         for item in downloaded:
             print(f"{item.cik}: {item.submissions} {item.companyfacts}")
+        return 0
+
+    if args.command == "sample":
+        stats = build_sample_database(args.manifest, args.output)
+        print(
+            f"built illustrative sample {stats.output_path}: "
+            f"{stats.companies} companies, {stats.annual_snapshots} annual snapshots, "
+            f"{stats.market_snapshots} market snapshots, "
+            f"{stats.operating_signals} operating signals, "
+            f"{stats.benchmark_observations} benchmark observations"
+        )
         return 0
 
     stats = build_database(
@@ -87,6 +99,14 @@ def _parser() -> argparse.ArgumentParser:
     build.add_argument("--output", type=Path, default=Path("data/finagent.db"))
     build.add_argument("--annual-periods", type=int, default=3)
     build.add_argument("--allow-missing", action="store_true")
+
+    sample = subparsers.add_parser(
+        "sample", help="Build a complete illustrative database without network access."
+    )
+    sample.add_argument(
+        "--manifest", type=Path, default=Path("data/source_manifest.yaml")
+    )
+    sample.add_argument("--output", type=Path, default=Path("data/finagent.db"))
     return parser
 
 

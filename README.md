@@ -90,6 +90,9 @@ uv run python -m finagent.ingestion download
 
 # This step is offline and builds SQLite atomically from the cache.
 uv run python -m finagent.ingestion build --output data/finagent.db
+
+# Or build a complete illustrative local database immediately (offline).
+uv run python -m finagent.ingestion sample --output data/finagent.db
 ```
 
 The curated universe is defined in [data/source_manifest.yaml](data/source_manifest.yaml).
@@ -101,6 +104,12 @@ Market snapshots, benchmark values, and additional IR-derived operating signals
 use the same schema but still require curated adapters/data before the final
 submission. Missing fields remain missing; the agent must return partial or
 insufficient-data outcomes instead of inventing them.
+
+The `sample` command creates deterministic records for every company in the
+three-sector manifest, including annual financials, market snapshots, benchmark
+metrics, and headcount/guidance/restructuring signals. Its sources are explicit
+fixture placeholders and every row is labelled as illustrative; use the SEC
+pipeline for research-grade data.
 
 ## Run the services
 
