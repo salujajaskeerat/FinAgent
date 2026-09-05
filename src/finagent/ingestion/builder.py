@@ -379,6 +379,7 @@ def build_database(
                             source_id,
                         )
             benchmark_count = _insert_sector_benchmarks(connection, manifest.sectors)
+            _prune_unreferenced_sources(connection)
             dataset_version = dataset_digest.hexdigest()[:16]
             connection.executemany(
                 "INSERT INTO dataset_metadata(key, value) VALUES (?, ?)",
@@ -389,6 +390,8 @@ def build_database(
                 ),
             )
             connection.commit()
+            # Reclaim the pages freed by pruning so the shipped file stays small.
+            connection.execute("VACUUM")
         os.replace(temporary, target)
     except Exception:
         temporary.unlink(missing_ok=True)
@@ -405,6 +408,39 @@ def build_database(
         dataset_version=dataset_version,
         output_path=target,
     )
+
+
+def _prune_unreferenced_sources(connection: sqlite3.Connection) -> int:
+    """Delete source rows that no fact, signal, benchmark, or lineage link cites.
+
+    The SEC submissions index lists every filing a company ever made, but the
+    dataset only cites the filings that supplied a stored value. Keeping the
+    rest inflates the database with thousands of unused provenance rows.
+
+    Parameters
+    ----------
+    connection
+        Open connection to the database under construction.
+
+    Returns
+    -------
+    int
+        Number of deleted source rows.
+    """
+    cursor = connection.execute(
+        """
+        DELETE FROM sources
+        WHERE id NOT IN (
+            SELECT source_id FROM annual_financial_snapshots
+            UNION SELECT source_id FROM market_snapshots
+            UNION SELECT source_id FROM operating_signals
+            UNION SELECT source_id FROM sector_benchmarks
+            UNION SELECT derived_source_id FROM source_lineage
+            UNION SELECT input_source_id FROM source_lineage
+        )
+        """
+    )
+    return int(cursor.rowcount)
 
 
 def _insert_sources(

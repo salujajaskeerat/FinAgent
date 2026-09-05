@@ -17,11 +17,17 @@ dist/
 Agent JD.pdf
 tmp/
 
-# Raw downloads and generated databases are reproducible build outputs.
+# Raw downloads are reproducible build inputs; the built SEC database is
+# committed so reviewers can run the project without network access.
 data/raw/*
 !data/raw/.gitkeep
 data/*.db
 data/*.sqlite
+!data/finagent.db
+
+# Agent tooling directories.
+.claude/
+.agents/
 
 # Local editor and operating-system files.
 .idea/

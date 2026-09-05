@@ -107,17 +107,17 @@ uv run python -m finagent.ingestion download-filings
 # Build and audit from the cache; both steps are offline.
 uv run python -m finagent.ingestion build \
   --raw-dir data/raw/sec \
-  --output data/finagent_sec.db
+  --output data/finagent.db
 uv run python -m finagent.ingestion audit \
-  --database data/finagent_sec.db \
+  --database data/finagent.db \
   --require-real-enrichment
 
 # Or refresh, build, and audit the complete public pipeline in one command.
 uv run python -m finagent.ingestion refresh-public \
-  --output data/finagent_sec.db
+  --output data/finagent.db
 
-# Or build a complete illustrative local database immediately (offline).
-uv run python -m finagent.ingestion sample --output data/finagent.db
+# Or build an illustrative placeholder database for offline plumbing checks.
+uv run python -m finagent.ingestion sample --output data/finagent_sample.db
 ```
 
 The curated universe is defined in [data/source_manifest.yaml](data/source_manifest.yaml).
@@ -146,7 +146,8 @@ evidence when those fields are required.
 
 ## Run the services
 
-After building `data/finagent.db`, start each process in a separate terminal:
+The committed `data/finagent.db` is the real SEC build, so no download is
+needed to run the services. Start each process in a separate terminal:
 
 ```bash
 uv run finagent-mcp

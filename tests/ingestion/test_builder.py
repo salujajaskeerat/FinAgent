@@ -209,3 +209,29 @@ def test_benchmarks_require_three_constituents_and_record_lineage(
             "SELECT value FROM sector_benchmarks WHERE metric = 'revenue'"
         ).fetchone()[0]
         assert revenue == 1200
+
+
+def test_build_keeps_only_cited_sources(tmp_path: Path) -> None:
+    """Every stored source must be cited by a fact, signal, benchmark, or lineage link."""
+    output = tmp_path / "finagent.db"
+    build_database(FIXTURES / "source_manifest.yaml", FIXTURES / "raw" / "sec", output)
+
+    with sqlite3.connect(output) as connection:
+        uncited = connection.execute(
+            """
+            SELECT COUNT(*) FROM sources
+            WHERE id NOT IN (
+                SELECT source_id FROM annual_financial_snapshots
+                UNION SELECT source_id FROM market_snapshots
+                UNION SELECT source_id FROM operating_signals
+                UNION SELECT source_id FROM sector_benchmarks
+                UNION SELECT derived_source_id FROM source_lineage
+                UNION SELECT input_source_id FROM source_lineage
+            )
+            """
+        ).fetchone()[0]
+        cited = connection.execute(
+            "SELECT COUNT(DISTINCT source_id) FROM annual_financial_snapshots"
+        ).fetchone()[0]
+    assert uncited == 0
+    assert cited >= 1

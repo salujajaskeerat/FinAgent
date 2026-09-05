@@ -180,14 +180,14 @@ def _parser() -> argparse.ArgumentParser:
         "--manifest", type=Path, default=Path("data/source_manifest.yaml")
     )
     refresh.add_argument("--raw-dir", type=Path, default=Path("data/raw/sec"))
-    refresh.add_argument("--output", type=Path, default=Path("data/finagent_sec.db"))
+    refresh.add_argument("--output", type=Path, default=Path("data/finagent.db"))
     refresh.add_argument("--annual-periods", type=int, default=3)
     refresh.add_argument("--requests-per-second", type=float, default=None)
 
     audit = subparsers.add_parser(
         "audit", help="Report database coverage and provenance integrity."
     )
-    audit.add_argument("--database", type=Path, default=Path("data/finagent_sec.db"))
+    audit.add_argument("--database", type=Path, default=Path("data/finagent.db"))
     audit.add_argument("--require-real-enrichment", action="store_true")
 
     sample = subparsers.add_parser(
@@ -196,7 +196,7 @@ def _parser() -> argparse.ArgumentParser:
     sample.add_argument(
         "--manifest", type=Path, default=Path("data/source_manifest.yaml")
     )
-    sample.add_argument("--output", type=Path, default=Path("data/finagent.db"))
+    sample.add_argument("--output", type=Path, default=Path("data/finagent_sample.db"))
     return parser
 
 
