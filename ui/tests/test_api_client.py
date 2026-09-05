@@ -60,7 +60,7 @@ def test_catalog_is_fetched_over_http_with_sector_query() -> None:
 def test_analysis_posts_structured_selection_and_parses_provenance() -> None:
     """The UI submits a single turn and retains source metadata."""
     payload = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "request_id": "29926b51-2896-4eab-86f0-3bb9059a605c",
         "status": "answered",
         "persona": "equity_analyst",

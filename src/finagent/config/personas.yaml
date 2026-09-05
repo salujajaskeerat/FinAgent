@@ -9,6 +9,8 @@
 #             `decision_output` are composed into the model's system
 #             instruction so the persona changes how evidence is reasoned
 #             about, not just the tone.
+# Calculation: `derived_metrics` names deterministic ratios computed in code
+#             from the retrieved observations before synthesis (core/derived.py).
 # Structure:  `required_sections` are the H3 headings the answer must contain.
 mutual_fund_analyst:
   label: Mutual Fund Analyst
@@ -39,6 +41,12 @@ mutual_fund_analyst:
   preferred_metrics:
     - market_cap
   include_benchmark: true
+  derived_metrics:
+    - revenue_growth_yoy
+    - operating_margin_delta_yoy
+    - fcf_margin
+    - operating_margin_vs_sector_median
+    - revenue_vs_sector_median
   event_kinds:
     - guidance
     - headcount
@@ -74,6 +82,10 @@ equity_analyst:
   preferred_metrics:
     - enterprise_value
     - share_price
+  derived_metrics:
+    - revenue_growth_yoy
+    - operating_income_growth_yoy
+    - operating_margin_delta_yoy
   event_kinds:
     - guidance
     - headcount
@@ -111,6 +123,12 @@ pe_analyst:
     - capital_expenditure
   preferred_metrics:
     - enterprise_value
+    - revenue
+  derived_metrics:
+    - fcf_margin
+    - capex_intensity
+    - net_debt
+    - net_debt_to_free_cash_flow
   event_kinds:
     - guidance
     - headcount

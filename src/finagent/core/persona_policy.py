@@ -25,6 +25,7 @@ class PersonaPolicy(StrictModel):
     required_metrics: list[str] = Field(min_length=1)
     preferred_metrics: list[str] = Field(default_factory=list)
     include_benchmark: bool = False
+    derived_metrics: list[str] = Field(default_factory=list)
     event_kinds: list[str] = Field(default_factory=list)
     required_sections: list[str] = Field(min_length=1)
 

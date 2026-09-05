@@ -26,6 +26,7 @@ from finagent.contracts.mcp import (
     EventResult,
     ObservationResult,
 )
+from finagent.core.derived import derive
 from finagent.core.errors import AnalysisTimeoutError
 from finagent.core.grounding import grounding_issues
 from finagent.core.models import EvidenceBundle, RetrievalPlan
@@ -176,6 +177,10 @@ class AnalysisService:
             warnings=[*observations.warnings, *events.warnings],
         )
 
+        # Deterministic arithmetic happens here, never inside the model.
+        trace.move(AnalysisState.CALCULATING)
+        evidence.derived = derive(evidence, policy)
+
         trace.move(AnalysisState.SYNTHESIZING)
         draft = await self._llm.synthesize(request, policy, evidence)
         trace.move(AnalysisState.VALIDATING)
@@ -223,6 +228,7 @@ class AnalysisService:
             sector=request.sector,
             answer_markdown=draft.answer_markdown,
             findings=draft.findings,
+            derived_metrics=evidence.derived,
             companies=referenced_companies,
             sources=list(source_map.values()),
             evidence_status=(

@@ -13,6 +13,7 @@ class AnalysisState(StrEnum):
     RESOLVING_SCOPE = "resolving_scope"
     PLANNING = "planning"
     RETRIEVING = "retrieving"
+    CALCULATING = "calculating"
     SYNTHESIZING = "synthesizing"
     VALIDATING = "validating"
     REPAIRING = "repairing"
@@ -23,7 +24,8 @@ _ALLOWED: dict[AnalysisState, set[AnalysisState]] = {
     AnalysisState.RECEIVED: {AnalysisState.RESOLVING_SCOPE},
     AnalysisState.RESOLVING_SCOPE: {AnalysisState.PLANNING, AnalysisState.COMPLETED},
     AnalysisState.PLANNING: {AnalysisState.RETRIEVING},
-    AnalysisState.RETRIEVING: {AnalysisState.SYNTHESIZING, AnalysisState.COMPLETED},
+    AnalysisState.RETRIEVING: {AnalysisState.CALCULATING, AnalysisState.COMPLETED},
+    AnalysisState.CALCULATING: {AnalysisState.SYNTHESIZING},
     AnalysisState.SYNTHESIZING: {AnalysisState.VALIDATING},
     AnalysisState.VALIDATING: {AnalysisState.REPAIRING, AnalysisState.COMPLETED},
     AnalysisState.REPAIRING: {AnalysisState.VALIDATING},

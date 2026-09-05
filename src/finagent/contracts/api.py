@@ -83,6 +83,24 @@ class Finding(StrictModel):
     source_ids: list[str] = Field(min_length=1)
 
 
+class DerivedMetric(StrictModel):
+    """One value computed deterministically from retrieved observations.
+
+    Derived metrics are never produced by the model; each carries the
+    observation and source identifiers it was computed from.
+    """
+
+    key: str
+    entity_id: str
+    value: float
+    unit: str
+    period_end: date
+    formula: str
+    input_observation_ids: list[str] = Field(min_length=1)
+    input_source_ids: list[str] = Field(min_length=1)
+    caveat: str | None = None
+
+
 class EvidenceCoverage(StrictModel):
     """Which persona-required inputs the retrieved evidence actually contained.
 
@@ -101,13 +119,14 @@ class EvidenceCoverage(StrictModel):
 class AnalysisResponse(StrictModel):
     """Structured, source-aware analysis response."""
 
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.1"] = "1.1"
     request_id: UUID
     status: AnalysisStatus
     persona: Persona
     sector: Sector
     answer_markdown: str
     findings: list[Finding] = Field(default_factory=list)
+    derived_metrics: list[DerivedMetric] = Field(default_factory=list)
     companies: list[CompanyRef] = Field(default_factory=list)
     sources: list[SourceRef] = Field(default_factory=list)
     evidence_status: EvidenceStatus
@@ -136,6 +155,9 @@ class AnalysisResponse(StrictModel):
                 raise ValueError("a finding cites a source absent from sources")
             if not set(finding.company_ids) <= company_ids:
                 raise ValueError("a finding cites a company absent from companies")
+        for metric in self.derived_metrics:
+            if not set(metric.input_source_ids) <= source_ids:
+                raise ValueError("a derived metric cites a source absent from sources")
         if self.status is AnalysisStatus.ANSWERED and not self.findings:
             raise ValueError("answered responses require at least one finding")
         if (

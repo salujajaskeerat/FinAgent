@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import Field
 
-from finagent.contracts.api import Finding, StrictModel
+from finagent.contracts.api import DerivedMetric, Finding, StrictModel
 from finagent.contracts.mcp import Event, Observation
 
 
@@ -31,5 +31,6 @@ class EvidenceBundle(StrictModel):
     company_ids: list[str] = Field(default_factory=list)
     observations: list[Observation] = Field(default_factory=list)
     events: list[Event] = Field(default_factory=list)
+    derived: list[DerivedMetric] = Field(default_factory=list)
     source_ids: set[str] = Field(default_factory=set)
     warnings: list[str] = Field(default_factory=list)
