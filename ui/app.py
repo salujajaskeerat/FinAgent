@@ -73,6 +73,15 @@ STATUS_BADGE = {
 }
 
 
+def prose(text: str) -> str:
+    """Escape dollar signs so Streamlit renders currency as text, not LaTeX.
+
+    ``st.markdown`` treats ``$...$`` as inline math, which turned every pair of
+    dollar figures in an answer into italic or code-styled fragments.
+    """
+    return text.replace("\\$", "$").replace("$", "\\$")
+
+
 def _client() -> FinAgentApiClient:
     """Build the API client from UI environment configuration."""
     base_url = os.getenv("FINAGENT_API_URL", "http://127.0.0.1:8000")
@@ -122,14 +131,14 @@ def _render_analysis(analysis: Analysis, catalog: Catalog, *, compact: bool) -> 
         st.caption("Required inputs: " + " · ".join(marks))
 
     if analysis.status in STATUS_BADGE:
-        st.warning(analysis.answer_markdown, icon=":material/block:")
+        st.warning(prose(analysis.answer_markdown), icon=":material/block:")
         if analysis.trace and analysis.trace.llm_calls == 0:
             st.caption(
                 "Stopped after scope resolution. No planning or synthesis call was "
                 "made, so nothing could be fabricated."
             )
     else:
-        st.markdown(analysis.answer_markdown)
+        st.markdown(prose(analysis.answer_markdown))
 
     if analysis.findings:
         with st.expander(
@@ -141,7 +150,7 @@ def _render_analysis(analysis: Analysis, catalog: Catalog, *, compact: bool) -> 
                     f":blue[{tickers.get(cid, cid)}]" for cid in finding.company_ids
                 )
                 sources = " ".join(f":gray-badge[{sid}]" for sid in finding.source_ids)
-                st.markdown(f"- {finding.text} {companies} {sources}")
+                st.markdown(f"- {prose(finding.text)} {companies} {sources}")
 
     if analysis.derived_metrics:
         with st.expander(
@@ -191,7 +200,7 @@ def _render_analysis(analysis: Analysis, catalog: Catalog, *, compact: bool) -> 
             expanded=analysis.evidence_status != "sufficient" and not compact,
         ):
             for limitation in analysis.limitations:
-                st.markdown(f"- {limitation}")
+                st.markdown(f"- {prose(limitation)}")
     st.caption(f"request id `{analysis.request_id}`")
 
 

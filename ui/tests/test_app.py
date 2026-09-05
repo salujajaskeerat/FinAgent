@@ -100,3 +100,15 @@ def test_page_renders_and_compare_mode_shows_three_columns() -> None:
         app.run()
         assert not app.exception
         assert len(app.columns) == 3
+
+
+def test_prose_escapes_dollar_signs_so_currency_is_not_rendered_as_math() -> None:
+    from ui.app import prose
+
+    text = "$66,987,000,000 in free cash flow with $19,359,000,000 in net debt"
+    escaped = prose(text)
+    assert escaped == (
+        "\\$66,987,000,000 in free cash flow with \\$19,359,000,000 in net debt"
+    )
+    # Idempotent: already-escaped input is not double-escaped.
+    assert prose(escaped) == escaped
