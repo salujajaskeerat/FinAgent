@@ -96,33 +96,35 @@ chain-of-thought.
 
 ```mermaid
 flowchart TB
-    subgraph BuildTime["Offline data build"]
-        Sources["SEC filings<br/>IR releases<br/>dated market source"]
-        Manifest["Curated source manifest"]
-        Builder["Normalize, validate<br/>and build database"]
-        DB[("Reproducible SQLite database")]
-
-        Sources --> Manifest
-        Manifest --> Builder
-        Builder --> DB
+    subgraph BuildTime["Offline data build (never in the request path)"]
+        EDGAR["SEC EDGAR<br/>submissions · companyfacts · 10-K cover pages"]
+        Manifest["Versioned company manifest<br/>12 companies · 3 sectors"]
+        Builder["Ingestion CLI<br/>normalize · derive benchmarks · audit"]
+        DB[("data/finagent.db<br/>read-only at runtime, committed")]
+        EDGAR --> Manifest --> Builder --> DB
     end
 
-    subgraph Runtime["Runtime"]
-        Human["Human user"] --> UI["Thin Streamlit UI"]
-        Consumer["External API consumer"] --> API["FastAPI"]
-        UI -->|"HTTP only"| API
-        API --> Agent["AnalysisService<br/>single bounded workflow"]
-        Agent --> Policy["Persona policy registry"]
-        Agent --> Calculator["Deterministic calculations"]
-        Agent --> LLM["Provider-neutral LLM gateway<br/>gemini / openai_compatible / anthropic / fake"]
+    subgraph Runtime["Runtime (three processes)"]
+        Human["Human"] --> UI["Streamlit UI<br/>ui/ — HTTP client only"]
+        Consumer["API consumer"] --> API
+        UI -->|"POST /v1/analyses/stream (SSE steps)"| API["FastAPI<br/>api/"]
+        API --> Agent["AnalysisService<br/>core/ — one bounded workflow"]
+
+        Agent --> Policy["Persona policy<br/>config/personas.yaml"]
+        Agent --> Derived["Derived metrics + grounding<br/>deterministic code"]
+        Agent --> Gateway["LLM gateway + entity resolver<br/>gateways/ — prompts, schemas, validation"]
+        Gateway --> Providers["One adapter per vendor<br/>gemini · openai_compatible · anthropic · fake"]
         Agent --> MCPClient["MCP client"]
-        MCPClient -->|"MCP Streamable HTTP"| MCPServer["MCP data server"]
-        MCPServer --> Repository["Read-only repository"]
-        Repository --> DB
+
+        MCPClient -->|"MCP Streamable HTTP"| MCPServer["MCP server<br/>4 typed read-only tools + schema resource"]
+        MCPServer --> Repo["Repository<br/>the only runtime SQLite access"]
+        Repo --> DB
     end
+
+    Providers -.->|"structured JSON only<br/>no tools, no SQL, no search"| LLM(["Model API"])
 ```
 
-The standalone Mermaid source is in
+The inline diagram is a verbatim copy of
 [`diagrams/architecture.mmd`](diagrams/architecture.mmd).
 
 ## Agent state machine
@@ -130,25 +132,32 @@ The standalone Mermaid source is in
 ```mermaid
 stateDiagram-v2
     [*] --> received
-    received --> resolving_scope
-    resolving_scope --> completed: unresolved explicit company (out_of_scope, no LLM call)
+    received --> resolving_scope: get_catalog + resolve_companies (parallel)
+    resolving_scope --> completed: explicit company not in catalog → out_of_scope (0 LLM calls)
     resolving_scope --> planning
-    planning --> retrieving: plan intersected with catalog + persona inputs
-    retrieving --> completed: no evidence (insufficient_data)
+    planning --> retrieving: model proposes plan → intersected with catalog, unioned with persona inputs
+    retrieving --> completed: no observations → insufficient_data
     retrieving --> calculating
-    calculating --> synthesizing: derived metrics attached
-    synthesizing --> validating
-    validating --> completed: all findings grounded
+    calculating --> synthesizing: derived metrics + coverage attached to evidence
+    synthesizing --> validating: typed draft (answer + findings)
+    validating --> completed: every finding cites retrieved source and company IDs → answered
     validating --> repairing: unknown source or company ID
-    repairing --> validating: one attempt only
+    repairing --> validating: one attempt, no new evidence
     completed --> [*]
+
+    note right of validating
+        A second failed validation ends in
+        insufficient_data. Each transition is
+        emitted as an SSE step event and recorded
+        in the response's trace.states.
+    end note
 ```
 
 State names match `AnalysisState` in `core/state.py`; the sequence visited is
 returned in every response's `trace.states`. A second failed validation ends in
 `insufficient_data`.
 
-The standalone Mermaid source is in
+The inline diagram is a verbatim copy of
 [`diagrams/agent-state-machine.mmd`](diagrams/agent-state-machine.mmd).
 
 ## API and MCP sequence
@@ -156,47 +165,74 @@ The standalone Mermaid source is in
 ```mermaid
 sequenceDiagram
     actor User
-    participant Client as "Streamlit or API client"
-    participant API as "FastAPI"
-    participant Agent as "AnalysisService"
-    participant MCP as "MCP data service"
-    participant DB as "SQLite"
-    participant LLM as "LLM adapter"
-    participant Validator as "Grounding validator"
+    participant Client as Streamlit / API client
+    participant API as FastAPI
+    participant Agent as AnalysisService
+    participant MCP as MCP server (+ SQLite)
+    participant LLM as LLM gateway → provider
 
-    User->>Client: Submit query, persona, sector
-    Client->>API: POST /v1/analyses
-    API->>Agent: Analyze typed request
-    Agent->>MCP: Resolve scope and load catalog
-    MCP-->>Agent: Canonical entities and allowlists
-    Agent->>LLM: Question, persona, catalog allowlists
-    LLM-->>Agent: Typed retrieval plan
-    Agent->>Agent: Constrain plan to catalog values
-    Agent->>MCP: Query allowlisted evidence
-    MCP->>DB: Parameterized read
-    DB-->>MCP: Facts, events, sources
-    MCP-->>Agent: Typed evidence
-    Agent->>Agent: Calculate features and coverage
-    Agent->>LLM: Evidence and persona policy
-    LLM-->>Agent: Typed findings
-    Agent->>Validator: Validate entities and evidence IDs
-    Agent-->>API: Validated response
-    API-->>Client: JSON and X-Request-ID
+    User->>Client: question, persona, sector
+    Client->>API: POST /v1/analyses (JSON) or /v1/analyses/stream (SSE)
+    API->>Agent: typed AnalysisRequest + request ID
+
+    rect rgb(245,245,245)
+        note over Agent,MCP: resolving_scope
+        par
+            Agent->>MCP: get_catalog(sector)
+        and
+            Agent->>MCP: resolve_companies(sector, query)
+        end
+        MCP-->>Agent: catalog allowlists · canonical entity IDs
+        opt explicit mention unresolved
+            Agent->>LLM: one constrained resolution (catalog names only)
+            LLM-->>Agent: catalog ID + confidence, or nothing
+        end
+    end
+
+    alt company not in catalog
+        Agent-->>API: out_of_scope (no planning or synthesis call)
+    else scope resolved
+        note over Agent,LLM: planning
+        Agent->>LLM: question + persona + catalog allowlists
+        LLM-->>Agent: proposed RetrievalPlan
+        Agent->>Agent: intersect with catalog, union persona required metrics
+
+        note over Agent,MCP: retrieving · calculating
+        Agent->>MCP: query_observations / query_events (allowlisted IDs only)
+        MCP-->>Agent: observations, events, sources (provenance in-band)
+        Agent->>Agent: derived metrics · coverage · evidence bundle
+
+        note over Agent,LLM: synthesizing · validating
+        Agent->>LLM: evidence bundle + persona policy
+        LLM-->>Agent: typed DraftAnalysis
+        Agent->>Agent: grounding check: source_ids and company_ids ⊆ retrieved
+        opt invalid citations
+            Agent->>LLM: repair once (same evidence, listed violations)
+            LLM-->>Agent: repaired draft
+        end
+        Agent-->>API: answered or insufficient_data
+    end
+
+    API-->>Client: AnalysisResponse + X-Request-ID (each state also streamed as an SSE step)
+    Client-->>User: answer, findings, sources, coverage, trace
 ```
 
-The standalone Mermaid source is in
+The inline diagram is a verbatim copy of
 [`diagrams/api-sequence.mmd`](diagrams/api-sequence.mmd).
 
 ## Runtime contracts
 
 The public API exposes:
 
-- `POST /v1/analyses`
+- `POST /v1/analyses` — one JSON `AnalysisResponse`
+- `POST /v1/analyses/stream` — the same run as Server-Sent Events: one `step`
+  event per state transition, then `result` (or `error`)
 - `GET /v1/catalog`
 - `GET /health/live`
 - `GET /health/ready`
 
-The MCP server exposes four typed tools:
+The MCP server exposes four typed, read-only tools (plus a `finagent://schema`
+resource with the dataset DDL):
 
 - `get_catalog`
 - `resolve_companies`
@@ -233,7 +269,7 @@ generated from a versioned source manifest and cached raw inputs.
 
 - Authentication or user accounts.
 - Persistent chat memory.
-- Streaming model tokens.
+- Streaming model tokens (workflow *steps* are streamed; tokens are not).
 - Runtime scraping or autonomous web browsing.
 - Vector databases or document RAG.
 - Arbitrary SQL tools.

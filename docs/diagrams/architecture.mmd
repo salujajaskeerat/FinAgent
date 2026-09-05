@@ -1,28 +1,27 @@
 flowchart TB
-    subgraph BuildTime["Offline data build"]
-        Sources["SEC filings<br/>IR releases<br/>dated market source"]
-        Manifest["Curated source manifest"]
-        Builder["Normalize, validate<br/>and build database"]
-        DB[("Reproducible SQLite database")]
-
-        Sources --> Manifest
-        Manifest --> Builder
-        Builder --> DB
+    subgraph BuildTime["Offline data build (never in the request path)"]
+        EDGAR["SEC EDGAR<br/>submissions · companyfacts · 10-K cover pages"]
+        Manifest["Versioned company manifest<br/>12 companies · 3 sectors"]
+        Builder["Ingestion CLI<br/>normalize · derive benchmarks · audit"]
+        DB[("data/finagent.db<br/>read-only at runtime, committed")]
+        EDGAR --> Manifest --> Builder --> DB
     end
 
-    subgraph Runtime["Runtime"]
-        Human["Human user"] --> UI["Thin Streamlit UI"]
-        Consumer["External API consumer"] --> API["FastAPI"]
+    subgraph Runtime["Runtime (three processes)"]
+        Human["Human"] --> UI["Streamlit UI<br/>ui/ — HTTP client only"]
+        Consumer["API consumer"] --> API
+        UI -->|"POST /v1/analyses/stream (SSE steps)"| API["FastAPI<br/>api/"]
+        API --> Agent["AnalysisService<br/>core/ — one bounded workflow"]
 
-        UI -->|"HTTP only"| API
-        API --> Agent["AnalysisService<br/>single bounded workflow"]
-
-        Agent --> Policy["Persona policy registry"]
-        Agent --> Calculator["Deterministic calculations"]
-        Agent --> LLM["Gemini structured-output adapter<br/>or explicit offline fake"]
+        Agent --> Policy["Persona policy<br/>config/personas.yaml"]
+        Agent --> Derived["Derived metrics + grounding<br/>deterministic code"]
+        Agent --> Gateway["LLM gateway + entity resolver<br/>gateways/ — prompts, schemas, validation"]
+        Gateway --> Providers["One adapter per vendor<br/>gemini · openai_compatible · anthropic · fake"]
         Agent --> MCPClient["MCP client"]
 
-        MCPClient -->|"MCP Streamable HTTP"| MCPServer["MCP data server"]
-        MCPServer --> Repository["Read-only repository"]
-        Repository --> DB
+        MCPClient -->|"MCP Streamable HTTP"| MCPServer["MCP server<br/>4 typed read-only tools + schema resource"]
+        MCPServer --> Repo["Repository<br/>the only runtime SQLite access"]
+        Repo --> DB
     end
+
+    Providers -.->|"structured JSON only<br/>no tools, no SQL, no search"| LLM(["Model API"])

@@ -1,41 +1,52 @@
 sequenceDiagram
     actor User
-    participant Client as "Streamlit or API client"
-    participant API as "FastAPI"
-    participant Agent as "AnalysisService"
-    participant MCP as "MCP data service"
-    participant DB as "SQLite"
-    participant LLM as "LLM adapter"
-    participant Validator as "Grounding validator"
+    participant Client as Streamlit / API client
+    participant API as FastAPI
+    participant Agent as AnalysisService
+    participant MCP as MCP server (+ SQLite)
+    participant LLM as LLM gateway → provider
 
-    User->>Client: Submit query, persona, sector
-    Client->>API: POST /v1/analyses
-    API->>API: Validate and assign request ID
-    API->>Agent: Analyze typed request
+    User->>Client: question, persona, sector
+    Client->>API: POST /v1/analyses (JSON) or /v1/analyses/stream (SSE)
+    API->>Agent: typed AnalysisRequest + request ID
 
-    Agent->>MCP: get_catalog and resolve_companies
-    MCP->>DB: Query supported scope
-    DB-->>MCP: Canonical entities
-    MCP-->>Agent: Typed scope result
-
-    alt Unsupported company
-        Agent-->>API: out_of_scope
-    else Supported scope
-        Agent->>LLM: Question, persona, catalog allowlists
-        LLM-->>Agent: Typed retrieval plan
-        Agent->>Agent: Constrain plan to catalog values
-        Agent->>MCP: query_observations
-        Agent->>MCP: query_events
-        MCP->>DB: Parameterized reads
-        DB-->>MCP: Facts, events, and sources
-        MCP-->>Agent: Typed evidence
-        Agent->>Agent: Calculate features and coverage
-        Agent->>LLM: Evidence and persona policy
-        LLM-->>Agent: Typed findings
-        Agent->>Validator: Validate entities and evidence IDs
-        Validator-->>Agent: Valid or one repair request
-        Agent-->>API: Validated response
+    rect rgb(245,245,245)
+        note over Agent,MCP: resolving_scope
+        par
+            Agent->>MCP: get_catalog(sector)
+        and
+            Agent->>MCP: resolve_companies(sector, query)
+        end
+        MCP-->>Agent: catalog allowlists · canonical entity IDs
+        opt explicit mention unresolved
+            Agent->>LLM: one constrained resolution (catalog names only)
+            LLM-->>Agent: catalog ID + confidence, or nothing
+        end
     end
 
-    API-->>Client: JSON and X-Request-ID
-    Client-->>User: Answer, sources, dates, limitations
+    alt company not in catalog
+        Agent-->>API: out_of_scope (no planning or synthesis call)
+    else scope resolved
+        note over Agent,LLM: planning
+        Agent->>LLM: question + persona + catalog allowlists
+        LLM-->>Agent: proposed RetrievalPlan
+        Agent->>Agent: intersect with catalog, union persona required metrics
+
+        note over Agent,MCP: retrieving · calculating
+        Agent->>MCP: query_observations / query_events (allowlisted IDs only)
+        MCP-->>Agent: observations, events, sources (provenance in-band)
+        Agent->>Agent: derived metrics · coverage · evidence bundle
+
+        note over Agent,LLM: synthesizing · validating
+        Agent->>LLM: evidence bundle + persona policy
+        LLM-->>Agent: typed DraftAnalysis
+        Agent->>Agent: grounding check: source_ids and company_ids ⊆ retrieved
+        opt invalid citations
+            Agent->>LLM: repair once (same evidence, listed violations)
+            LLM-->>Agent: repaired draft
+        end
+        Agent-->>API: answered or insufficient_data
+    end
+
+    API-->>Client: AnalysisResponse + X-Request-ID (each state also streamed as an SSE step)
+    Client-->>User: answer, findings, sources, coverage, trace

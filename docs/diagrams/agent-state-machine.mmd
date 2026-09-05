@@ -1,14 +1,21 @@
 stateDiagram-v2
     [*] --> received
-    received --> resolving_scope
-    resolving_scope --> completed: unresolved explicit company (out_of_scope, no LLM call)
+    received --> resolving_scope: get_catalog + resolve_companies (parallel)
+    resolving_scope --> completed: explicit company not in catalog → out_of_scope (0 LLM calls)
     resolving_scope --> planning
-    planning --> retrieving: plan intersected with catalog + persona inputs
-    retrieving --> completed: no evidence (insufficient_data)
+    planning --> retrieving: model proposes plan → intersected with catalog, unioned with persona inputs
+    retrieving --> completed: no observations → insufficient_data
     retrieving --> calculating
-    calculating --> synthesizing: derived metrics attached
-    synthesizing --> validating
-    validating --> completed: all findings grounded
+    calculating --> synthesizing: derived metrics + coverage attached to evidence
+    synthesizing --> validating: typed draft (answer + findings)
+    validating --> completed: every finding cites retrieved source and company IDs → answered
     validating --> repairing: unknown source or company ID
-    repairing --> validating: one attempt only
+    repairing --> validating: one attempt, no new evidence
     completed --> [*]
+
+    note right of validating
+        A second failed validation ends in
+        insufficient_data. Each transition is
+        emitted as an SSE step event and recorded
+        in the response's trace.states.
+    end note
