@@ -1,5 +1,6 @@
 """Repository integration against the real offline builder schema."""
 
+import sqlite3
 from pathlib import Path
 
 from finagent.contracts.api import Sector
@@ -74,3 +75,60 @@ def test_repository_resolves_known_and_explicit_unknown_companies(
 
     assert known.resolved[0].mention == "EXM"
     assert unknown.unresolved_mentions == ["SpaceX"]
+
+
+def test_repository_expands_derived_source_lineage(tmp_path: Path) -> None:
+    """Return constituent SEC sources with a derived benchmark source."""
+    database = tmp_path / "finagent.db"
+    build_database(
+        FIXTURES / "source_manifest.yaml",
+        FIXTURES / "raw" / "sec",
+        database,
+    )
+    with sqlite3.connect(database) as connection:
+        input_source_id = connection.execute(
+            "SELECT source_id FROM annual_financial_snapshots LIMIT 1"
+        ).fetchone()[0]
+        connection.execute(
+            """
+            INSERT INTO sources(
+                id, publisher, title, url, retrieved_at, raw_sha256
+            ) VALUES (
+                'derived:test', 'FinAgent derived from U.S. SEC filings',
+                'Test median', 'https://www.sec.gov/edgar/search/',
+                '2025-03-01', 'test-digest'
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO source_lineage(derived_source_id, input_source_id)
+            VALUES ('derived:test', ?)
+            """,
+            (input_source_id,),
+        )
+        connection.execute(
+            """
+            INSERT INTO sector_benchmarks(
+                id, sector_id, as_of, metric, value, unit,
+                quality_caveat, source_id
+            ) VALUES (
+                'benchmark:test', 'tech', '2024-12-31', 'revenue', 1200,
+                'USD', 'Test derived median.', 'derived:test'
+            )
+            """
+        )
+        connection.commit()
+
+    result = SectorRepository(database).query_observations(
+        Sector.TECH,
+        ["benchmark:tech"],
+        ["revenue"],
+        latest_only=True,
+        limit=100,
+    )
+
+    assert {source.source_id for source in result.sources} == {
+        "derived:test",
+        input_source_id,
+    }

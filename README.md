@@ -88,12 +88,19 @@ export SEC_USER_AGENT="finagent-assignment/0.1 your-email@example.com"
 # Download all 12 curated companies, or add --sector/--ticker to narrow it.
 uv run python -m finagent.ingestion download
 
-# This step is offline and builds SQLite atomically from the cache.
-uv run python -m finagent.ingestion build --output data/finagent.db
+# Download the latest annual filing declared by each cached submission.
+uv run python -m finagent.ingestion download-filings
 
-# Build a separate database from the real SEC cache.
+# Build and audit from the cache; both steps are offline.
 uv run python -m finagent.ingestion build \
   --raw-dir data/raw/sec \
+  --output data/finagent_sec.db
+uv run python -m finagent.ingestion audit \
+  --database data/finagent_sec.db \
+  --require-real-enrichment
+
+# Or refresh, build, and audit the complete public pipeline in one command.
+uv run python -m finagent.ingestion refresh-public \
   --output data/finagent_sec.db
 
 # Or build a complete illustrative local database immediately (offline).
@@ -104,11 +111,12 @@ The curated universe is defined in [data/source_manifest.yaml](data/source_manif
 Raw downloads and generated databases are intentionally ignored; fixture data
 under `tests/ingestion/fixtures` keeps CI deterministic.
 
-The initial SEC adapter builds annual financial snapshots and headcount signals.
-Market snapshots, benchmark values, and additional IR-derived operating signals
-use the same schema but still require curated adapters/data before the final
-submission. Missing fields remain missing; the agent must return partial or
-insufficient-data outcomes instead of inventing them.
+The public pipeline caches SEC submissions, Companyfacts, and immutable
+accession-specific annual filings with retrieval metadata and SHA-256 digests.
+The offline builder produces annual financial snapshots, conservatively
+extracted headcount signals, explicitly disclosed cover-page share prices, and
+three-company-minimum sector medians. Derived benchmark sources retain lineage
+to their constituent SEC filing sources.
 
 The `sample` command creates deterministic records for every company in the
 three-sector manifest, including annual financials, market snapshots, benchmark
@@ -116,11 +124,12 @@ metrics, and headcount/guidance/restructuring signals. Its sources are explicit
 fixture placeholders and every row is labelled as illustrative; use the SEC
 pipeline for research-grade data.
 
-The SEC-backed build is currently annual-financials only: the fetched Companyfacts
-responses produced 36 annual snapshots across the 12 companies. Market prices,
-benchmarks, and compatible headcount/IR signals are not inferred from missing
-fields; those remain empty until their dedicated public-source adapters are
-added, so analyses correctly report partial or insufficient evidence.
+The current real-data build contains 36 annual snapshots, 12 headcount signals,
+2 filing-disclosed share prices, and 22 derived benchmark observations. SEC
+filings do not consistently state a per-share cover price, so missing market
+rows remain absent. `market_cap`, `enterprise_value`, guidance, and restructuring
+are never inferred or fabricated; analyses report partial or insufficient
+evidence when those fields are required.
 
 ## Run the services
 

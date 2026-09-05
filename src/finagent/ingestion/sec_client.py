@@ -29,6 +29,15 @@ class DownloadedCompanyFiles:
     companyfacts: Path
 
 
+@dataclass(frozen=True, slots=True)
+class DownloadedAnnualReport:
+    """Local cached copy of one company's latest annual filing document."""
+
+    cik: str
+    accession_number: str
+    document: Path
+
+
 class SecEdgarClient:
     """Download and cache the two small SEC JSON resources used by FinAgent.
 
@@ -95,6 +104,72 @@ class SecEdgarClient:
             cik=cik, submissions=submissions, companyfacts=companyfacts
         )
 
+    def download_latest_annual_report(
+        self, company: CompanySpec, *, overwrite: bool = False
+    ) -> DownloadedAnnualReport:
+        """Cache the latest annual filing HTML declared by SEC submissions.
+
+        The submissions cache must already exist. The selected accession, report
+        date, and filing date are recorded beside the document so offline builders
+        need not infer network state.
+
+        Parameters
+        ----------
+        company:
+            Company whose latest annual filing is selected.
+        overwrite:
+            Whether to refresh an existing valid document.
+
+        Returns
+        -------
+        DownloadedAnnualReport
+            Selected accession and cached document path.
+
+        Raises
+        ------
+        FileNotFoundError
+            If submissions have not been cached first.
+        ValueError
+            If submissions contain no usable annual filing.
+        """
+        company_dir = self._config.cache_dir / company.padded_cik
+        submissions_path = company_dir / "submissions.json"
+        if not submissions_path.exists():
+            raise FileNotFoundError(
+                f"missing submissions cache for {company.ticker}: {submissions_path}"
+            )
+        submissions = _read_json(submissions_path)
+        if not isinstance(submissions, dict):
+            raise TypeError(f"SEC submissions must be an object: {submissions_path}")
+        filing = _latest_annual_filing(submissions)
+        accession = filing["accession_number"]
+        document_name = filing["primary_document"]
+        if Path(document_name).name != document_name:
+            raise ValueError(f"unsafe SEC primary document path: {document_name}")
+        accession_compact = accession.replace("-", "")
+        url = (
+            f"{self._config.archives_base_url}/Archives/edgar/data/"
+            f"{int(company.padded_cik)}/{accession_compact}/{document_name}"
+        )
+        destination = company_dir / "filings" / accession_compact / document_name
+        self._fetch_document(
+            url,
+            destination,
+            overwrite=overwrite,
+            metadata={
+                "accession_number": accession,
+                "filed_at": filing["filed_at"],
+                "form": filing["form"],
+                "local_filename": document_name,
+                "report_date": filing["report_date"],
+            },
+        )
+        return DownloadedAnnualReport(
+            cik=company.padded_cik,
+            accession_number=accession,
+            document=destination,
+        )
+
     def _fetch_json(self, url: str, destination: Path, *, overwrite: bool) -> Path:
         if destination.exists() and not overwrite:
             _read_json(destination)
@@ -136,6 +211,44 @@ class SecEdgarClient:
             sort_keys=True,
         ).encode("utf-8")
         _write_atomic(_metadata_path(destination), metadata)
+        return destination
+
+    def _fetch_document(
+        self,
+        url: str,
+        destination: Path,
+        *,
+        overwrite: bool,
+        metadata: dict[str, str],
+    ) -> Path:
+        metadata_path = _metadata_path(destination)
+        if destination.exists() and not overwrite:
+            _validate_cached_file(destination, metadata_path)
+            return destination
+
+        self._wait_for_rate_limit()
+        request = Request(
+            url,
+            headers={
+                "Accept": "text/html,application/xhtml+xml",
+                "User-Agent": self._config.user_agent,
+            },
+        )
+        body = self._transport(request, self._config.timeout_seconds)
+        if not body.strip():
+            raise ValueError(f"empty SEC filing document: {url}")
+        _write_atomic(destination, body)
+        metadata_body = json.dumps(
+            {
+                **metadata,
+                "retrieved_at": datetime.now(UTC).date().isoformat(),
+                "sha256": sha256(body).hexdigest(),
+                "url": url,
+            },
+            indent=2,
+            sort_keys=True,
+        ).encode("utf-8")
+        _write_atomic(metadata_path, metadata_body)
         return destination
 
     def _wait_for_rate_limit(self) -> None:
@@ -201,6 +314,54 @@ def download_manifest(
     )
 
 
+def download_manifest_annual_reports(
+    manifest: SourceManifest,
+    config: SecDownloadConfig,
+    *,
+    sector: str | None = None,
+    ticker: str | None = None,
+    overwrite: bool = False,
+) -> tuple[DownloadedAnnualReport, ...]:
+    """Download the latest cached-submissions annual report for each company.
+
+    Parameters
+    ----------
+    manifest:
+        Validated source manifest.
+    config:
+        SEC identity, cache, and rate-limit settings.
+    sector:
+        Optional sector-id filter.
+    ticker:
+        Optional ticker filter.
+    overwrite:
+        Whether to refresh cached filing documents.
+
+    Returns
+    -------
+    tuple[DownloadedAnnualReport, ...]
+        Cached annual filing documents in manifest order.
+
+    Raises
+    ------
+    ValueError
+        If the filters select no companies.
+    """
+    selected = [
+        company
+        for sector_spec, company in manifest.iter_companies()
+        if (sector is None or sector_spec.id == sector.lower())
+        and (ticker is None or company.ticker == ticker.upper())
+    ]
+    if not selected:
+        raise ValueError("annual-report filters selected no companies")
+    client = SecEdgarClient(config)
+    return tuple(
+        client.download_latest_annual_report(company, overwrite=overwrite)
+        for company in selected
+    )
+
+
 def _read_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
@@ -208,6 +369,59 @@ def _read_json(path: Path) -> Any:
 
 def _metadata_path(destination: Path) -> Path:
     return destination.with_suffix(".metadata.json")
+
+
+def _validate_cached_file(path: Path, metadata_path: Path) -> None:
+    if not metadata_path.exists():
+        raise ValueError(
+            f"cache metadata is missing for {path}; rerun with --overwrite"
+        )
+    metadata = _read_json(metadata_path)
+    if not isinstance(metadata, dict):
+        raise TypeError(f"cache metadata must be an object: {metadata_path}")
+    if metadata.get("sha256") != sha256(path.read_bytes()).hexdigest():
+        raise ValueError(
+            f"cache digest does not match metadata for {path}; rerun with --overwrite"
+        )
+
+
+def _latest_annual_filing(submissions: dict[str, Any]) -> dict[str, str]:
+    recent = submissions.get("filings", {}).get("recent", {})
+    if not isinstance(recent, dict):
+        raise TypeError("SEC submissions recent filing index must be an object")
+    accessions = recent.get("accessionNumber", [])
+    forms = recent.get("form", [])
+    filing_dates = recent.get("filingDate", [])
+    report_dates = recent.get("reportDate", [])
+    documents = recent.get("primaryDocument", [])
+    annual_forms = {"10-K", "20-F", "40-F"}
+    candidates: list[dict[str, str]] = []
+    for index, form in enumerate(forms if isinstance(forms, list) else []):
+        accession = _list_text(accessions, index)
+        document = _list_text(documents, index)
+        if form not in annual_forms or accession is None or document is None:
+            continue
+        candidates.append(
+            {
+                "accession_number": accession,
+                "filed_at": _list_text(filing_dates, index) or "",
+                "form": str(form),
+                "primary_document": document,
+                "report_date": _list_text(report_dates, index) or "",
+            }
+        )
+    if not candidates:
+        raise ValueError("SEC submissions contain no annual filing document")
+    return max(
+        candidates, key=lambda item: (item["filed_at"], item["accession_number"])
+    )
+
+
+def _list_text(values: Any, index: int) -> str | None:
+    if not isinstance(values, list) or index >= len(values):
+        return None
+    value = values[index]
+    return str(value) if value not in (None, "") else None
 
 
 def _write_atomic(destination: Path, body: bytes) -> None:

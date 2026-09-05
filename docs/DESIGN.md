@@ -179,7 +179,13 @@ The purpose-built schema contains:
 - market snapshots;
 - operating signals;
 - sector benchmarks; and
-- sources.
+- sources plus derived-source lineage.
+
+Public-data refresh is an explicit ingestion operation. SEC submissions,
+Companyfacts, and accession-specific annual filings are cached with hashes and
+retrieval metadata. Database construction and auditing then run offline. Sector
+benchmarks are medians of at least three current SEC-backed company records;
+their derived source retains links to each constituent source.
 
 Each factual row stores the reporting/effective date, publication date, source,
 unit or currency where applicable, and a quality caveat. The sample database is

@@ -25,6 +25,8 @@ class SecDownloadConfig:
         Per-request network timeout.
     base_url:
         SEC data API origin. Override only in tests or controlled mirrors.
+    archives_base_url:
+        SEC filing-archive origin. Override only in tests or controlled mirrors.
     """
 
     user_agent: str
@@ -32,6 +34,7 @@ class SecDownloadConfig:
     requests_per_second: float = 2.0
     timeout_seconds: float = 30.0
     base_url: str = "https://data.sec.gov"
+    archives_base_url: str = "https://www.sec.gov"
 
     def __post_init__(self) -> None:
         """Validate limits and the required SEC identity."""
@@ -49,6 +52,8 @@ class SecDownloadConfig:
             raise ValueError("timeout_seconds must be greater than 0")
         if not self.base_url.startswith(("https://", "http://")):
             raise ValueError("base_url must be an HTTP(S) URL")
+        if not self.archives_base_url.startswith(("https://", "http://")):
+            raise ValueError("archives_base_url must be an HTTP(S) URL")
 
     @classmethod
     def from_env(

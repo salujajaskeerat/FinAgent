@@ -404,6 +404,20 @@ class SectorRepository:
         unique_ids = list(dict.fromkeys(source_ids))
         if not unique_ids:
             return []
+        lineage_marks = ",".join("?" for _ in unique_ids)
+        lineage_rows = connection.execute(
+            f"""
+            SELECT input_source_id FROM source_lineage
+            WHERE derived_source_id IN ({lineage_marks})
+            ORDER BY input_source_id
+            """,
+            unique_ids,
+        ).fetchall()
+        unique_ids.extend(
+            row["input_source_id"]
+            for row in lineage_rows
+            if row["input_source_id"] not in unique_ids
+        )
         marks = ",".join("?" for _ in unique_ids)
         rows = connection.execute(
             f"""

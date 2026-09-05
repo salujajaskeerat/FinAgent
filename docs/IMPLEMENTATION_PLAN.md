@@ -32,9 +32,13 @@ evidence status. Run this milestone independently with:
 uv run pytest -m integration
 ```
 
-The next delivery focus is M1 data depth: a small, well-sourced evidence set for
-all three sectors. Production-model work, richer UI, and deployment remain out
-of scope until that evidence layer is reproducible.
+The M1 SEC-only core is now reproducible: a single explicit refresh command
+caches submissions, Companyfacts, and immutable annual filings; the offline
+builder populates financials, headcount, filing-disclosed prices, and
+source-lineaged peer medians; and a read-only audit verifies coverage and
+provenance. The next data task is an explicitly licensed price/valuation adapter
+for fields that annual filings do not disclose consistently. Production-model
+work, richer UI, and deployment remain later milestones.
 
 ## Delivery Principles
 
