@@ -218,3 +218,78 @@ def test_generic_llm_api_key_selects_any_provider(
     monkeypatch.setenv("LLM_PROVIDER", "not-a-provider")
     with pytest.raises(ValueError, match="LLM_PROVIDER"):
         LlmSettings.from_env()
+
+
+def test_persona_frames_produce_distinct_system_instructions() -> None:
+    """The persona changes the reasoning instruction, not only the label."""
+    from finagent.gateways.llm import synthesis_instruction
+
+    store = PersonaPolicyStore.load()
+    instructions = {
+        persona: synthesis_instruction(store.get(persona)) for persona in Persona
+    }
+
+    assert len(set(instructions.values())) == 3
+    assert "benchmark" in instructions[Persona.MUTUAL_FUND].lower()
+    assert "leverage" in instructions[Persona.PE].lower()
+    assert "margin" in instructions[Persona.EQUITY].lower()
+    for persona, text in instructions.items():
+        policy = store.get(persona)
+        assert "untrusted evidence" in text
+        for section in policy.required_sections:
+            assert f"### {section}" in text
+        for rule in policy.must_avoid:
+            assert rule in text
+
+
+def test_synthesis_uses_persona_instruction_and_thinking_budget() -> None:
+    data = StubDataGateway()
+    expected = DraftAnalysis(
+        answer_markdown="ok",
+        findings=[
+            {"text": "x", "company_ids": ["cmp_example"], "source_ids": ["src_fixture"]}
+        ],
+    )
+    generate = RecordingGenerateContent(types.GenerateContentResponse(parsed=expected))
+    gateway = StructuredLlmGateway(
+        GeminiProvider(_settings(), generate), synthesis_thinking_budget=512
+    )
+    evidence = EvidenceBundle(company_ids=["cmp_example"], source_ids={"src_fixture"})
+    del data
+
+    asyncio.run(
+        gateway.synthesize(
+            _request(), PersonaPolicyStore.load().get(Persona.PE), evidence
+        )
+    )
+
+    config = generate.calls[0]["config"]
+    assert "PE Analyst" in config.system_instruction
+    assert "Entry and leverage case" in config.system_instruction
+    assert config.thinking_config.thinking_budget == 512
+    assert config.max_output_tokens == 4_096
+
+
+def test_fake_provider_digest_differs_by_persona_and_stays_grounded() -> None:
+    from finagent.core.analysis_service import AnalysisService
+
+    service = AnalysisService(
+        StubDataGateway(), FakeLlmGateway(), PersonaPolicyStore.load()
+    )
+    answers = {
+        persona: asyncio.run(
+            service.analyze(
+                AnalysisRequest(query="Assess.", persona=persona, sector=Sector.TECH)
+            )
+        )
+        for persona in Persona
+    }
+
+    assert len({item.answer_markdown for item in answers.values()}) == 3
+    for persona, answer in answers.items():
+        policy = PersonaPolicyStore.load().get(persona)
+        assert all(
+            f"### {s}" in answer.answer_markdown for s in policy.required_sections
+        )
+        assert "| cmp_example |" in answer.answer_markdown
+        assert answer.limitations

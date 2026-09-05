@@ -17,6 +17,11 @@ class PersonaPolicy(StrictModel):
     label: str
     description: str
     horizon: str
+    voice: str
+    reasoning_frame: list[str] = Field(min_length=1)
+    must_address: list[str] = Field(min_length=1)
+    must_avoid: list[str] = Field(default_factory=list)
+    decision_output: str
     required_metrics: list[str] = Field(min_length=1)
     preferred_metrics: list[str] = Field(default_factory=list)
     include_benchmark: bool = False

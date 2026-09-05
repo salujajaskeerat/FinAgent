@@ -24,7 +24,7 @@ EXAMPLE_QUESTIONS = (
 def _client() -> FinAgentApiClient:
     """Build the API client from UI environment configuration."""
     base_url = os.getenv("FINAGENT_API_URL", "http://127.0.0.1:8000")
-    timeout = float(os.getenv("FINAGENT_UI_TIMEOUT_SECONDS", "50"))
+    timeout = float(os.getenv("FINAGENT_UI_TIMEOUT_SECONDS", "90"))
     return FinAgentApiClient(base_url, timeout_seconds=timeout)
 
 

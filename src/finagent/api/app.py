@@ -48,7 +48,9 @@ load_dotenv(override=False)
 def build_service() -> AnalysisService:
     """Build the default application service from environment configuration."""
     mcp_url = os.getenv("FINAGENT_MCP_URL", "http://127.0.0.1:8001/mcp")
-    timeout = float(os.getenv("FINAGENT_ANALYSIS_TIMEOUT_SECONDS", "45"))
+    # Plan, synthesis, and one repair each get LLM_TIMEOUT_SECONDS (20s default),
+    # plus a 5s entity-resolution fallback, so the global deadline must exceed 65s.
+    timeout = float(os.getenv("FINAGENT_ANALYSIS_TIMEOUT_SECONDS", "75"))
     llm_settings = LlmSettings.from_env()
     # One vendor adapter is shared by the analysis gateway and entity resolver.
     provider = build_provider(llm_settings)

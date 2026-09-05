@@ -42,7 +42,7 @@ class AnalysisService:
         data_gateway: DataGateway,
         llm_gateway: LlmGateway,
         policies: PersonaPolicyStore,
-        deadline_seconds: float = 45.0,
+        deadline_seconds: float = 75.0,
         entity_resolver: EntityResolver | None = None,
     ) -> None:
         self._data = data_gateway

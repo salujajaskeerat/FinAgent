@@ -38,6 +38,7 @@ class LlmSettings:
     base_url: str | None = None
     timeout_seconds: float = 20.0
     max_attempts: int = 2
+    synthesis_thinking_budget: int = 1024
 
     def __post_init__(self) -> None:
         if not self.model:
@@ -72,6 +73,9 @@ class LlmSettings:
             raise ValueError("LLM_TIMEOUT_SECONDS must be between 1 and 60")
         if not 1 <= max_attempts <= 5:
             raise ValueError("LLM_MAX_ATTEMPTS must be between 1 and 5")
+        thinking_budget = int(os.getenv("LLM_SYNTHESIS_THINKING_BUDGET", "1024"))
+        if not 0 <= thinking_budget <= 8192:
+            raise ValueError("LLM_SYNTHESIS_THINKING_BUDGET must be between 0 and 8192")
         api_key = os.getenv("LLM_API_KEY", "").strip() or None
         legacy_variable = _LEGACY_KEY_VARIABLES.get(provider)
         if api_key is None and legacy_variable:
@@ -83,6 +87,7 @@ class LlmSettings:
             base_url=os.getenv("LLM_BASE_URL", "").strip() or None,
             timeout_seconds=timeout_seconds,
             max_attempts=max_attempts,
+            synthesis_thinking_budget=thinking_budget,
         )
 
     def key_requirement(self) -> str:
