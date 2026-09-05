@@ -94,6 +94,39 @@ class Catalog:
 
 
 @dataclass(frozen=True)
+class DerivedMetric:
+    """Value computed by the application from retrieved observations."""
+
+    key: str
+    entity_id: str
+    value: float
+    unit: str
+    period_end: str
+    formula: str
+    caveat: str | None = None
+
+
+@dataclass(frozen=True)
+class Coverage:
+    """Persona-required inputs the retrieved evidence did or did not contain."""
+
+    required_metrics: tuple[str, ...]
+    available_metrics: tuple[str, ...]
+    missing_metrics: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Trace:
+    """How the answer was produced."""
+
+    states: tuple[str, ...]
+    llm_calls: int
+    repaired: bool
+    proposed_metric_keys: tuple[str, ...]
+    constrained_metric_keys: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Analysis:
     """Evidence-aware analysis response consumed by the UI."""
 
@@ -108,6 +141,9 @@ class Analysis:
     sources: tuple[Source, ...]
     limitations: tuple[str, ...]
     data_as_of: str | None = None
+    derived_metrics: tuple[DerivedMetric, ...] = ()
+    coverage: Coverage | None = None
+    trace: Trace | None = None
 
 
 class FinAgentApiClient:
@@ -346,4 +382,46 @@ def _parse_analysis(payload: Mapping[str, Any]) -> Analysis:
         sources=tuple(_parse_source(item) for item in _object_list(payload, "sources")),
         limitations=_string_tuple(payload, "limitations"),
         data_as_of=_optional_date(payload, "data_as_of"),
+        derived_metrics=tuple(
+            DerivedMetric(
+                key=_required_string(item, "key"),
+                entity_id=_required_string(item, "entity_id"),
+                value=float(item.get("value", 0.0)),
+                unit=_required_string(item, "unit"),
+                period_end=_required_string(item, "period_end"),
+                formula=_required_string(item, "formula"),
+                caveat=item.get("caveat") or None,
+            )
+            for item in _object_list(payload, "derived_metrics")
+        ),
+        coverage=_parse_coverage(payload.get("coverage")),
+        trace=_parse_trace(payload.get("trace")),
+    )
+
+
+def _parse_coverage(value: Any) -> Coverage | None:
+    if not isinstance(value, Mapping):
+        return None
+    return Coverage(
+        required_metrics=_string_tuple(value, "required_metrics"),
+        available_metrics=_string_tuple(value, "available_metrics"),
+        missing_metrics=_string_tuple(value, "missing_metrics"),
+    )
+
+
+def _parse_trace(value: Any) -> Trace | None:
+    if not isinstance(value, Mapping):
+        return None
+    proposed = value.get("proposed_plan") or {}
+    constrained = value.get("constrained_plan") or {}
+    return Trace(
+        states=_string_tuple(value, "states"),
+        llm_calls=int(value.get("llm_calls", 0)),
+        repaired=bool(value.get("repaired", False)),
+        proposed_metric_keys=_string_tuple(proposed, "metric_keys")
+        if isinstance(proposed, Mapping)
+        else (),
+        constrained_metric_keys=_string_tuple(constrained, "metric_keys")
+        if isinstance(constrained, Mapping)
+        else (),
     )
