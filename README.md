@@ -187,12 +187,12 @@ vendor SDK; each provider is one adapter behind a single
 
 ```dotenv
 LLM_PROVIDER=gemini
-LLM_MODEL=gemini-2.5-flash-lite
+LLM_MODEL=gemini-3.5-flash-lite
 LLM_API_KEY=...                        # GEMINI_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY also accepted
 LLM_BASE_URL=                          # openai_compatible only
 ```
 
-Gemini 2.5 Flash-Lite has a free tier whose prompts may be used by Google to
+Gemini Flash-Lite has a free tier whose prompts may be used by Google to
 improve its products, so send this demo only public information. The API binds
 to loopback and has no authentication; a public deployment would need both.
 

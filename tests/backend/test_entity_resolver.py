@@ -92,7 +92,7 @@ def test_resolver_receives_only_selected_sector_catalog_candidates() -> None:
         ],
     }
     assert "tools" not in call
-    assert call["config"].response_schema is EntityResolution
+    assert call["config"].response_schema["required"] == ["status", "reason_code"]
     assert call["config"].temperature == 0.0
 
 

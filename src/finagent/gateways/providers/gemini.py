@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import Awaitable, Callable
 
 from google import genai
 from google.genai import errors, types
+from pydantic import BaseModel
 
 from finagent.core.errors import DependencyUnavailableError, RateLimitError
 from finagent.gateways.providers.base import LlmSettings, StructuredRequest
 
 GenerateContent = Callable[..., Awaitable[types.GenerateContentResponse]]
+logger = logging.getLogger("finagent.llm.gemini")
 
 
 class GeminiProvider:
@@ -57,11 +60,15 @@ class GeminiProvider:
             temperature=request.temperature,
             candidate_count=1,
             max_output_tokens=request.max_output_tokens,
-            thinking_config=types.ThinkingConfig(
-                thinking_budget=request.thinking_budget
+            # Gemini 3.x rejects thinking_budget=0; omit the config to use the
+            # model's default and only pass an explicit positive budget.
+            thinking_config=(
+                types.ThinkingConfig(thinking_budget=request.thinking_budget)
+                if request.thinking_budget > 0
+                else None
             ),
             response_mime_type="application/json",
-            response_schema=request.schema,
+            response_schema=gemini_schema(request.schema),
         )
         generate_content = self._generate_content or self._generate_with_sdk
         try:
@@ -72,18 +79,24 @@ class GeminiProvider:
                     config=config,
                 )
         except errors.APIError as exc:
+            # Server-side log only: status and message help operators, never the key.
+            logger.warning("gemini API error %s: %s", exc.code, exc.message)
             if exc.code == 429:
                 raise RateLimitError(
                     "Gemini rate limit exceeded after bounded retries."
                 ) from exc
             raise DependencyUnavailableError(
-                "Gemini could not complete the structured model request."
+                f"Gemini rejected the structured model request (HTTP {exc.code})."
             ) from exc
         except TimeoutError as exc:
+            logger.warning(
+                "gemini request timed out after %ss", self._settings.timeout_seconds
+            )
             raise DependencyUnavailableError(
                 "Gemini did not respond within the configured timeout."
             ) from exc
         except Exception as exc:
+            logger.warning("gemini request failed: %s: %s", type(exc).__name__, exc)
             raise DependencyUnavailableError(
                 "Gemini could not complete the structured model request."
             ) from exc
@@ -111,3 +124,70 @@ class GeminiProvider:
         )
         async with client.aio as async_client:
             return await async_client.models.generate_content(**kwargs)
+
+
+# Keys the Gemini response_schema format understands. Everything else that
+# Pydantic emits (title, default, additionalProperties, minLength, $defs, ...)
+# is rejected with HTTP 400 and must be stripped.
+_GEMINI_SCHEMA_KEYS = frozenset(
+    {
+        "type",
+        "format",
+        "description",
+        "enum",
+        "items",
+        "properties",
+        "required",
+        "nullable",
+        "minimum",
+        "maximum",
+        "minItems",
+        "maxItems",
+    }
+)
+
+
+def gemini_schema(schema: type[BaseModel]) -> dict[str, object]:
+    """Convert a Pydantic model into a schema Gemini's API accepts.
+
+    Parameters
+    ----------
+    schema
+        Strict Pydantic model describing the expected structured output.
+
+    Returns
+    -------
+    dict[str, object]
+        JSON schema with ``$ref`` inlined, ``Optional`` expressed as
+        ``nullable``, and unsupported keywords removed. Field validation still
+        happens application-side against the original model.
+    """
+    raw = schema.model_json_schema()
+    definitions = raw.get("$defs", {})
+
+    def clean(node: dict[str, object]) -> dict[str, object]:
+        if "$ref" in node:
+            name = str(node["$ref"]).rsplit("/", 1)[-1]
+            return clean(dict(definitions[name]))
+        if "anyOf" in node:
+            branches = [item for item in node["anyOf"] if item.get("type") != "null"]
+            nullable = len(branches) != len(node["anyOf"])
+            merged = clean(dict(branches[0])) if len(branches) == 1 else {}
+            if nullable:
+                merged["nullable"] = True
+            if "description" in node:
+                merged["description"] = node["description"]
+            return merged
+        result: dict[str, object] = {}
+        for key, value in node.items():
+            if key not in _GEMINI_SCHEMA_KEYS:
+                continue
+            if key == "properties":
+                result[key] = {name: clean(dict(prop)) for name, prop in value.items()}
+            elif key == "items":
+                result[key] = clean(dict(value))
+            else:
+                result[key] = value
+        return result
+
+    return clean(raw)

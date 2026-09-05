@@ -17,7 +17,7 @@ from pydantic import BaseModel
 SUPPORTED_PROVIDERS = ("fake", "gemini", "openai_compatible", "anthropic")
 
 _DEFAULT_MODELS = {
-    "gemini": "gemini-2.5-flash-lite",
+    "gemini": "gemini-3.5-flash-lite",
     "openai_compatible": "gpt-4o-mini",
     "anthropic": "claude-opus-5",
 }

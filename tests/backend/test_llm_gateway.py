@@ -85,14 +85,17 @@ def test_gemini_plan_uses_structured_output_without_receiving_tools() -> None:
     assert result == expected
     assert len(generate.calls) == 1
     call = generate.calls[0]
-    assert call["model"] == "gemini-2.5-flash-lite"
+    assert call["model"] == "gemini-3.5-flash-lite"
     assert "tools" not in call
     assert json.loads(call["contents"])["target_entity_ids"] == ["cmp_example"]
     config = call["config"]
     assert isinstance(config, types.GenerateContentConfig)
     assert config.response_mime_type == "application/json"
-    assert config.response_schema is RetrievalPlan
-    assert config.thinking_config.thinking_budget == 0
+    # The schema is converted to Gemini's dialect: no additionalProperties/title.
+    assert config.response_schema["required"] == ["entity_ids", "metric_keys"]
+    assert "additionalProperties" not in config.response_schema
+    assert "title" not in config.response_schema
+    assert config.thinking_config is None  # planning runs without extra thinking
     assert config.tools is None
 
 
