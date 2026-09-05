@@ -177,8 +177,9 @@ def test_gemini_maps_rate_limit_without_leaking_upstream_detail() -> None:
 def test_provider_selection_requires_explicit_fake(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("LLM_PROVIDER", raising=False)
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    # app.py loads a developer's .env on import, so clear every key variable.
+    for name in ("LLM_PROVIDER", "LLM_API_KEY", "GEMINI_API_KEY", "LLM_MODEL"):
+        monkeypatch.delenv(name, raising=False)
 
     assert isinstance(build_llm_gateway(), FakeLlmGateway)
 
