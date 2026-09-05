@@ -10,11 +10,13 @@ from finagent.contracts.api import (
     AnalysisRequest,
     AnalysisResponse,
     AnalysisStatus,
+    AnalysisTrace,
     CatalogResponse,
     CompanyRef,
     EvidenceCoverage,
     EvidenceStatus,
     PersonaOption,
+    PlanRef,
     Sector,
     SectorOption,
 )
@@ -138,19 +140,25 @@ class AnalysisService:
                 target_ids = [fallback_id]
             else:
                 trace.move(AnalysisState.COMPLETED)
-                return self._out_of_scope(request, request_id, company_entities)
+                return self._out_of_scope(
+                    request, request_id, company_entities, self._trace(trace, catalog)
+                )
 
         if not target_ids:
             target_ids = [entity.entity_id for entity in company_entities]
         if not target_ids:
             trace.move(AnalysisState.COMPLETED)
             return self._insufficient(
-                request, request_id, "No companies are loaded for this sector."
+                request,
+                request_id,
+                "No companies are loaded for this sector.",
+                self._trace(trace, catalog),
             )
 
         trace.move(AnalysisState.PLANNING)
         proposed_plan = await self._llm.plan(request, policy, catalog, target_ids)
         plan = self._constrain_plan(proposed_plan, catalog, target_ids, policy)
+        llm_calls = 1
 
         trace.move(AnalysisState.RETRIEVING)
         observations, events = await asyncio.gather(
@@ -163,6 +171,7 @@ class AnalysisService:
                 request,
                 request_id,
                 "The dataset contains no observations relevant to this question.",
+                self._trace(trace, catalog, proposed_plan, plan, llm_calls=llm_calls),
             )
 
         source_map = {
@@ -183,12 +192,16 @@ class AnalysisService:
 
         trace.move(AnalysisState.SYNTHESIZING)
         draft = await self._llm.synthesize(request, policy, evidence)
+        llm_calls += 1
         trace.move(AnalysisState.VALIDATING)
         allowed_companies = {entity.entity_id for entity in company_entities}
         issues = grounding_issues(draft, allowed_companies, evidence.source_ids)
+        repaired = False
         if issues:
             trace.move(AnalysisState.REPAIRING)
             draft = await self._llm.repair(request, policy, evidence, draft, issues)
+            llm_calls += 1
+            repaired = True
             trace.move(AnalysisState.VALIDATING)
             issues = grounding_issues(draft, allowed_companies, evidence.source_ids)
         if issues:
@@ -197,6 +210,7 @@ class AnalysisService:
                 request,
                 request_id,
                 "The generated answer could not be linked reliably to retrieved evidence.",
+                self._trace(trace, catalog, proposed_plan, plan, repaired, llm_calls),
             )
 
         trace.move(AnalysisState.COMPLETED)
@@ -239,6 +253,30 @@ class AnalysisService:
             coverage=coverage,
             data_as_of=self._data_as_of(observations, events),
             limitations=limitations,
+            trace=self._trace(trace, catalog, proposed_plan, plan, repaired, llm_calls),
+        )
+
+    @staticmethod
+    def _trace(
+        trace: StateTrace,
+        catalog: DatasetCatalog,
+        proposed: RetrievalPlan | None = None,
+        constrained: RetrievalPlan | None = None,
+        repaired: bool = False,
+        llm_calls: int = 0,
+    ) -> AnalysisTrace:
+        """Summarize the run: states visited and model proposal versus query run."""
+
+        def ref(plan: RetrievalPlan | None) -> PlanRef | None:
+            return PlanRef(**plan.model_dump()) if plan else None
+
+        return AnalysisTrace(
+            states=[state.value for state in trace.history],
+            dataset_version=catalog.dataset_version,
+            proposed_plan=ref(proposed),
+            constrained_plan=ref(constrained),
+            repaired=repaired,
+            llm_calls=llm_calls,
         )
 
     @staticmethod
@@ -296,6 +334,7 @@ class AnalysisService:
         request: AnalysisRequest,
         request_id: UUID,
         company_entities: list[CatalogEntity],
+        trace: AnalysisTrace | None = None,
     ) -> AnalysisResponse:
         """Return the stable response for an unresolved explicit company."""
         supported = ", ".join(entity.name for entity in company_entities)
@@ -312,6 +351,7 @@ class AnalysisService:
             limitations=[
                 f"Supported companies for {request.sector.value}: {supported}."
             ],
+            trace=trace,
         )
 
     async def _get_observations(
@@ -402,6 +442,7 @@ class AnalysisService:
         request: AnalysisRequest,
         request_id: UUID,
         limitation: str,
+        trace: AnalysisTrace | None = None,
     ) -> AnalysisResponse:
         return AnalysisResponse(
             request_id=request_id,
@@ -411,4 +452,5 @@ class AnalysisService:
             answer_markdown="I do not have enough sourced data to answer this question reliably.",
             evidence_status=EvidenceStatus.NONE,
             limitations=[limitation],
+            trace=trace,
         )

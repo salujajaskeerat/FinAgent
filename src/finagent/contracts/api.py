@@ -116,6 +116,31 @@ class EvidenceCoverage(StrictModel):
     available_event_kinds: list[str] = Field(default_factory=list)
 
 
+class PlanRef(StrictModel):
+    """A retrieval plan as identifiers only."""
+
+    entity_ids: list[str] = Field(default_factory=list)
+    metric_keys: list[str] = Field(default_factory=list)
+    event_kinds: list[str] = Field(default_factory=list)
+    latest_only: bool = False
+
+
+class AnalysisTrace(StrictModel):
+    """How the answer was produced, for programmatic consumers and audits.
+
+    ``proposed_plan`` is what the model asked for; ``constrained_plan`` is the
+    query the application actually ran after intersecting the proposal with the
+    MCP catalog and adding the persona's required inputs.
+    """
+
+    states: list[str]
+    dataset_version: str | None = None
+    proposed_plan: PlanRef | None = None
+    constrained_plan: PlanRef | None = None
+    repaired: bool = False
+    llm_calls: int = 0
+
+
 class AnalysisResponse(StrictModel):
     """Structured, source-aware analysis response."""
 
@@ -133,6 +158,7 @@ class AnalysisResponse(StrictModel):
     coverage: EvidenceCoverage | None = None
     data_as_of: date | None = None
     limitations: list[str] = Field(default_factory=list)
+    trace: AnalysisTrace | None = None
 
     @model_validator(mode="after")
     def validate_evidence_links(self) -> Self:

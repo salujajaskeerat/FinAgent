@@ -69,3 +69,68 @@ def test_catalog_drives_frontend_selectors() -> None:
     assert response.status_code == 200
     assert len(response.json()["personas"]) == 3
     assert response.json()["companies"][0]["ticker"] == "EXM"
+
+
+def test_trace_exposes_states_and_model_proposal_versus_query_run() -> None:
+    """Programmatic consumers can see how the answer was produced."""
+    answered = asyncio.run(
+        _request(
+            "POST",
+            "/v1/analyses",
+            json={
+                "query": "How do the fundamentals look?",
+                "persona": "pe_analyst",
+                "sector": "tech",
+            },
+        )
+    ).json()
+
+    trace = answered["trace"]
+    assert trace["states"] == [
+        "received",
+        "resolving_scope",
+        "planning",
+        "retrieving",
+        "calculating",
+        "synthesizing",
+        "validating",
+        "completed",
+    ]
+    assert trace["llm_calls"] == 2
+    assert trace["repaired"] is False
+    assert trace["dataset_version"] == "fixture-v1"
+    assert trace["proposed_plan"]["entity_ids"] == ["cmp_example"]
+    # The persona's required inputs were added by the application, not the model.
+    assert set(trace["constrained_plan"]["metric_keys"]) >= {
+        "free_cash_flow",
+        "total_debt",
+    }
+    assert answered["schema_version"] == "1.1"
+
+
+def test_out_of_scope_trace_shows_no_llm_call() -> None:
+    service = AnalysisService(
+        StubDataGateway(unresolved=["Unknown Corp"]),
+        FakeLlmGateway(),
+        PersonaPolicyStore.load(),
+    )
+    transport = httpx.ASGITransport(app=create_app(service))
+
+    async def call() -> httpx.Response:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://t"
+        ) as client:
+            return await client.post(
+                "/v1/analyses",
+                json={
+                    "query": "What do you think about Unknown Corp?",
+                    "persona": "equity_analyst",
+                    "sector": "tech",
+                },
+            )
+
+    body = asyncio.run(call()).json()
+    assert body["status"] == "out_of_scope"
+    assert body["trace"]["states"] == ["received", "resolving_scope", "completed"]
+    assert body["trace"]["llm_calls"] == 0
+    assert body["trace"]["proposed_plan"] is None
